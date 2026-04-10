@@ -334,7 +334,7 @@ async function saveMemo(studentId, memo) {
 }
 
 async function loadPrints() {
-  const { data, error } = await sb.from('prints').select('id,name,subject,unit,grade,book,file_name,created_at').order('created_at');
+  const { data, error } = await sb.from('prints').select('id,name,subject,unit,grade,book,file_name,file_url,created_at').order('created_at');
   if (error) throw error;
   prints = data || [];
   try {
@@ -596,39 +596,40 @@ async function openStudentPrintPage(studentId) {
 }
 
 async function doPrintTargets(targets, studentId, printIds) {
-  // 印刷時にfile_dataを個別取得
-  const withFile = [];
-  for (const p of targets) {
-    if (p.file_name) {
-      const { data } = await sb.from('prints').select('id,file_data').eq('id', p.id).single();
-      if (data?.file_data) withFile.push({...p, file_data: data.file_data});
-    }
-  }
+  const withFile = targets.filter(p => p.file_url || p.file_name);
   if (!withFile.length) {
     toast('PDFファイルが登録されていません');
     return;
   }
   for (const p of withFile) {
     try {
-      const base64 = p.file_data.split(',')[1];
-      const mime = p.file_data.split(';')[0].split(':')[1];
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-      const blob = new Blob([bytes], { type: mime });
-      const url = URL.createObjectURL(blob);
+      let printUrl = p.file_url;
+      // 古いfile_data形式の場合はfetch
+      if (!printUrl && p.file_name) {
+        const { data } = await sb.from('prints').select('file_url,file_data').eq('id', p.id).single();
+        printUrl = data?.file_url;
+        if (!printUrl && data?.file_data) {
+          const base64 = data.file_data.split(',')[1];
+          const mime = data.file_data.split(';')[0].split(':')[1];
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+          const blob = new Blob([bytes], { type: mime });
+          printUrl = URL.createObjectURL(blob);
+        }
+      }
+      if (!printUrl) continue;
       const printHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + p.name + '</title>'
         + '<style>*{margin:0;padding:0}embed{width:100%;height:100vh;display:block}</style></head>'
-        + '<body><embed src="' + url + '" type="application/pdf" width="100%" height="100%">'
+        + '<body><embed src="' + printUrl + '" type="application/pdf" width="100%" height="100%">'
         + '<script>window.onload=function(){setTimeout(function(){window.print();},1200);}<\/script>'
         + '</body></html>';
       const win = window.open('', '_blank');
-      if (!win) { toast('ポップアップを許可してください'); URL.revokeObjectURL(url); break; }
+      if (!win) { toast('ポップアップを許可してください'); break; }
       win.document.write(printHtml);
       win.document.close();
-      setTimeout(() => URL.revokeObjectURL(url), 120000);
       await new Promise(r => setTimeout(r, 1000));
-    } catch(e) { console.error(e); }
+    } catch(e) { console.error(e); toast('印刷エラー: ' + e.message); }
   }
   if (studentId) await recordPrintHistory(studentId, printIds);
   toast('印刷ダイアログを開いています...');
@@ -1084,16 +1085,24 @@ async function addPrintFromForm() {
   if (!book || !grade || !subject || !unit) { toast('全項目を入力してください'); return; }
 
   toast('追加中...');
-  let fileData = null, fileName = null;
+  let fileUrl = null, fileName = null;
+
   if (file) {
-    fileData = await new Promise((res, rej) => {
-      const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsDataURL(file);
-    });
+    // Supabase Storageにアップロード
+    const filePath = book + '/' + grade + '/' + subject + '/' + unit + '_' + Date.now() + '.' + file.name.split('.').pop();
+    const { data: uploadData, error: uploadError } = await sb.storage.from('prints').upload(filePath, file, { upsert: true });
+    if (uploadError) {
+      toast('ファイルアップロードエラー: ' + uploadError.message);
+      return;
+    }
+    const { data: urlData } = sb.storage.from('prints').getPublicUrl(filePath);
+    fileUrl = urlData.publicUrl;
     fileName = file.name;
   }
+
   const name = book + ' ' + subject + ' ' + unit;
-  const { data: newPrint, error } = await sb.from('prints').insert({ name, subject, unit, grade, book, file_data: fileData, file_name: fileName }).select().single();
-  if (error) { toast('エラーが発生しました'); return; }
+  const { data: newPrint, error } = await sb.from('prints').insert({ name, subject, unit, grade, book, file_url: fileUrl, file_name: fileName }).select().single();
+  if (error) { toast('登録エラー: ' + error.message); return; }
 
   const unitTags = unit.split(/[,、／・]/).map(u => u.trim()).filter(u => u);
   if (unitTags.length > 0) {
