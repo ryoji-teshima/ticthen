@@ -596,7 +596,9 @@ async function openStudentPrintPage(studentId) {
 }
 
 async function doPrintTargets(targets, studentId, printIds) {
+  console.log('doPrintTargets called', targets.length, 'targets:', JSON.stringify(targets.map(p=>({id:p.id,unit:p.unit,file_url:p.file_url,file_name:p.file_name}))));
   const withFile = targets.filter(p => p.file_url || p.file_name);
+  console.log('withFile:', withFile.length);
   if (!withFile.length) {
     toast('PDFファイルが登録されていません');
     return;
@@ -604,6 +606,7 @@ async function doPrintTargets(targets, studentId, printIds) {
   for (const p of withFile) {
     try {
       let printUrl = p.file_url;
+      console.log('printUrl:', printUrl);
       // 古いfile_data形式の場合はfetch
       if (!printUrl && p.file_name) {
         const { data } = await sb.from('prints').select('file_url,file_data').eq('id', p.id).single();
