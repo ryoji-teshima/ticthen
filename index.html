@@ -334,7 +334,7 @@ async function saveMemo(studentId, memo) {
 }
 
 async function loadPrints() {
-  const { data, error } = await sb.from('prints').select('*').order('created_at');
+  const { data, error } = await sb.from('prints').select('id,name,subject,unit,grade,book,file_name,created_at').order('created_at');
   if (error) throw error;
   prints = data || [];
   try {
@@ -596,7 +596,14 @@ async function openStudentPrintPage(studentId) {
 }
 
 async function doPrintTargets(targets, studentId, printIds) {
-  const withFile = targets.filter(p => p.file_data);
+  // 印刷時にfile_dataを個別取得
+  const withFile = [];
+  for (const p of targets) {
+    if (p.file_name) {
+      const { data } = await sb.from('prints').select('id,file_data').eq('id', p.id).single();
+      if (data?.file_data) withFile.push({...p, file_data: data.file_data});
+    }
+  }
   if (!withFile.length) {
     toast('PDFファイルが登録されていません');
     return;
