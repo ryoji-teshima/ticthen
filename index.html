@@ -1089,7 +1089,10 @@ async function addPrintFromForm() {
 
   if (file) {
     // Supabase Storageにアップロード
-    const filePath = book + '/' + grade + '/' + subject + '/' + unit + '_' + Date.now() + '.' + file.name.split('.').pop();
+    // ファイルパスは英数字のみ（日本語を除去）
+    const ext = file.name.split('.').pop().toLowerCase();
+    const safeId = Date.now().toString();
+    const filePath = safeId + '.' + ext;
     const { data: uploadData, error: uploadError } = await sb.storage.from('prints').upload(filePath, file, { upsert: true });
     if (uploadError) {
       toast('ファイルアップロードエラー: ' + uploadError.message);
