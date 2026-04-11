@@ -805,8 +805,10 @@ async function renderKarte() {
       const availableGrades = gradePrefix === '中'
         ? ['中1','中2','中3']
         : ['小4','小5','小6'];
-      if (!selectedGradeTab || !availableGrades.includes(selectedGradeTab)) {
+      // 生徒が変わったら現在の学年にリセット
+      if (!selectedGradeTab || !availableGrades.includes(selectedGradeTab) || window._lastKarteStudent !== s.id) {
         selectedGradeTab = s.grade;
+        window._lastKarteStudent = s.id;
       }
       const viewGrade = selectedGradeTab;
       const subjects = GRADE_SUBJECTS[viewGrade] || [];
