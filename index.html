@@ -529,23 +529,33 @@ async function openStudentPrintPage(studentId) {
     if (!matchedPrints.length) {
       html += '<div style="padding:12px;color:var(--text-hint);font-size:14px;background:var(--bg);border-radius:var(--radius);margin-bottom:16px">まだプリントが登録されていません</div>';
     } else {
-      html += '<div style="margin-bottom:16px">';
-      matchedPrints.forEach(p => {
-        const sel = selectedForPrint.includes(p.id);
-        const hist = printHistory.filter(h => h.student_id === studentId && h.print_id === p.id);
-        const lastDate = hist.length ? hist[0].printed_at : null;
-        html += '<div data-action="toggle-sel" data-id="' + p.id + '" class="print-card ' + (sel?'selected':'') + '" style="margin-bottom:8px;cursor:pointer">';
-        html += '<div class="pc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + (sel?'#534AB7':'#888780') + '" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>';
-        html += '<div style="flex:1;min-width:0">';
-        html += '<div class="pc-name">' + p.unit;
-        if (lastDate) html += '<span style="font-size:11px;background:#FAEEDA;color:#633806;padding:2px 7px;border-radius:10px;margin-left:6px;font-weight:600">渡済 ' + lastDate.slice(5).replace('-','/') + (hist.length>1?' (計'+hist.length+'回)':'') + '</span>';
+      // 問題集ごとにグループ化
+      const books = ['ひとつひとつわかりやすく', 'ちびむす'];
+      books.forEach(book => {
+        const bookPrints = matchedPrints.filter(p => p.book === book);
+        if (!bookPrints.length) return;
+        html += '<div style="margin-bottom:14px">';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--blue-dark)">📚 ' + book + '</div>';
+        html += '<div style="font-size:12px;color:var(--text-hint)">' + bookPrints.length + '件</div>';
         html += '</div>';
-        html += '<div class="pc-sub">' + p.book + ' / ' + p.subject + '</div>';
-        html += '</div>';
-        if (sel) html += '<div style="color:var(--purple);font-size:18px">✓</div>';
+        bookPrints.forEach(p => {
+          const sel = selectedForPrint.includes(p.id);
+          const hist = printHistory.filter(h => h.student_id === studentId && h.print_id === p.id);
+          const lastDate = hist.length ? hist[0].printed_at : null;
+          html += '<div data-action="toggle-sel" data-id="' + p.id + '" class="print-card ' + (sel?'selected':'') + '" style="margin-bottom:8px;cursor:pointer">';
+          html += '<div class="pc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + (sel?'#534AB7':'#888780') + '" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>';
+          html += '<div style="flex:1;min-width:0">';
+          html += '<div class="pc-name">' + p.unit;
+          if (lastDate) html += '<span style="font-size:11px;background:#FAEEDA;color:#633806;padding:2px 7px;border-radius:10px;margin-left:6px;font-weight:600">渡済 ' + lastDate.slice(5).replace('-','/') + (hist.length>1?' (計'+hist.length+'回)':'') + '</span>';
+          html += '</div>';
+          html += '<div class="pc-sub">' + p.subject + '</div>';
+          html += '</div>';
+          if (sel) html += '<div style="color:var(--purple);font-size:18px">✓</div>';
+          html += '</div>';
+        });
         html += '</div>';
       });
-      html += '</div>';
     }
 
     // 印刷ボタン
