@@ -259,6 +259,7 @@ let selectedPrints = [];
 let students = [];
 let classSlots = [];
 let selectedDay = '月';
+let selectedGradeTab = null;
 let skillCache = {}; // {studentId: {subject: {unit: status}, __memo: ''}}
 let prints = [];
 
@@ -663,6 +664,18 @@ async function openSlotAssign(studentId) {
   });
   html += '</div>';
   el.innerHTML = html;
+  el.onchange = async function(e) {
+    const t = e.target.closest('[data-action]');
+    if (!t || t.dataset.action !== 'change-grade') return;
+    const newGrade = t.value;
+    const sid = t.dataset.id;
+    await sb.from('students').update({ grade: newGrade }).eq('id', sid);
+    const s = students.find(x => x.id === sid);
+    if (s) s.grade = newGrade;
+    toast((s?.name||'生徒') + 'の学年を' + newGrade + 'に変更しました');
+    selectedGradeTab = null;
+    renderStudentsTab();
+  };
   el.onclick = async function(e) {
     const t = e.target.closest('[data-action]');
     if (!t) return;
@@ -799,12 +812,11 @@ async function renderKarte() {
       el.innerHTML = html + `<div class="loading"><span class="spinner"></span>読み込み中...</div>`;
       const skills = await loadSkills(selectedStudent);
 
-      // 学年タブ：現在の学年をデフォルトに
-      const gradeNum = parseInt(s.grade.replace(/[^0-9]/g, ''));
+      // 学年タブ：全学年表示（予習・復習対応）
       const gradePrefix = s.grade.includes('小') ? '小' : '中';
       const availableGrades = gradePrefix === '中'
-        ? ['中1','中2','中3'].filter(g => parseInt(g.replace('中','')) <= gradeNum)
-        : ['小4','小5','小6'].filter(g => parseInt(g.replace('小','')) <= gradeNum);
+        ? ['中1','中2','中3']
+        : ['小4','小5','小6'];
       if (!selectedGradeTab || !availableGrades.includes(selectedGradeTab)) {
         selectedGradeTab = s.grade;
       }
@@ -1237,12 +1249,13 @@ function renderStudentsTab() {
       const slotText = slots.length
         ? slots.map(c => c.day_of_week + '曜 ' + c.time_slot).join('　')
         : 'コマ未設定';
+      const gradeOpts2 = Object.keys(GRADE_SUBJECTS).map(g => '<option' + (g===s.grade?' selected':'') + '>' + g + '</option>').join('');
       html += '<div class="card" style="margin-bottom:10px">'
         + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">'
         + '<div class="avatar">' + s.name.slice(-1) + '</div>'
         + '<div style="flex:1;min-width:0">'
         + '<div style="font-size:15px;font-weight:600">' + s.name + '</div>'
-        + '<div style="font-size:12px;color:var(--text-sub)">' + s.grade + '</div>'
+        + '<select data-action="change-grade" data-id="' + s.id + '" style="font-size:12px;padding:3px 6px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:var(--bg);color:var(--text-sub);font-family:inherit;margin-top:2px">' + gradeOpts2 + '</select>'
         + '</div>'
         + '<button class="btn btn-red btn-sm" data-action="del" data-id="' + s.id + '">削除</button>'
         + '</div>'
@@ -1261,6 +1274,17 @@ function renderStudentsTab() {
     const action = t.dataset.action;
     if (action === 'add') { await addStudent(); return; }
     if (action === 'del') { await deleteStudent(t.dataset.id); return; }
+    if (action === 'change-grade') {
+      const newGrade = t.value;
+      const sid = t.dataset.id;
+      await sb.from('students').update({ grade: newGrade }).eq('id', sid);
+      const s = students.find(x => x.id === sid);
+      if (s) s.grade = newGrade;
+      toast(s?.name + 'の学年を' + newGrade + 'に変更しました');
+      selectedGradeTab = null;
+      renderStudentsTab();
+      return;
+    }
     if (action === 'editslot') { openSlotAssignInStudents(t.dataset.id); return; }
     if (action === 'togglenew') {
       const key = t.dataset.key;
