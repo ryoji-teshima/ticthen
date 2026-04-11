@@ -798,53 +798,73 @@ async function renderKarte() {
     if (s) {
       el.innerHTML = html + `<div class="loading"><span class="spinner"></span>読み込み中...</div>`;
       const skills = await loadSkills(selectedStudent);
-      const subjects = GRADE_SUBJECTS[s.grade] || [];
 
-      let skillHtml = `<div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-          <div style="font-size:16px;font-weight:600">${s.name} <span style="font-size:13px;font-weight:400;color:var(--text-hint)">${s.grade}</span></div>
-          <div class="legend">
-            <span><span class="dot" style="background:#1D9E75"></span>得意</span>
-            <span><span class="dot" style="background:#E24B4A"></span>苦手</span>
-            <span><span class="dot" style="background:#888780"></span>普通</span>
-          </div>
-        </div>`;
+      // 学年タブ：現在の学年をデフォルトに
+      const gradeNum = parseInt(s.grade.replace(/[^0-9]/g, ''));
+      const gradePrefix = s.grade.includes('小') ? '小' : '中';
+      const availableGrades = gradePrefix === '中'
+        ? ['中1','中2','中3'].filter(g => parseInt(g.replace('中','')) <= gradeNum)
+        : ['小4','小5','小6'].filter(g => parseInt(g.replace('小','')) <= gradeNum);
+      if (!selectedGradeTab || !availableGrades.includes(selectedGradeTab)) {
+        selectedGradeTab = s.grade;
+      }
+      const viewGrade = selectedGradeTab;
+      const subjects = GRADE_SUBJECTS[viewGrade] || [];
+
+      // 学年タブUI
+      let gradeTabs = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">';
+      availableGrades.forEach(g => {
+        const isActive = g === viewGrade;
+        const border = isActive ? '2px solid var(--blue)' : '0.5px solid var(--border-md)';
+        const bg = isActive ? 'var(--blue-light)' : 'transparent';
+        const color = isActive ? 'var(--blue-dark)' : 'var(--text-sub)';
+        const fw = isActive ? '600' : '400';
+        gradeTabs += '<button data-grade="' + g + '" data-action="grade-tab" style="padding:5px 12px;border-radius:20px;border:' + border + ';background:' + bg + ';color:' + color + ';font-weight:' + fw + ';cursor:pointer;font-family:inherit;font-size:13px">' + g + '</button>';
+      });
+      gradeTabs += '</div>';
+
+      let skillHtml = '<div class="card">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
+        + '<div style="font-size:16px;font-weight:600">' + s.name + ' <span style="font-size:13px;font-weight:400;color:var(--text-hint)">' + s.grade + '</span></div>'
+        + '<div class="legend"><span><span class="dot" style="background:#1D9E75"></span>得意</span><span><span class="dot" style="background:#E24B4A"></span>苦手</span><span><span class="dot" style="background:#888780"></span>普通</span></div>'
+        + '</div>'
+        + gradeTabs;
+
       subjects.forEach(sub => {
-        const units = getUnitsForGrade(sub, s.grade);
+        const units = getUnitsForGrade(sub, viewGrade);
         if (!units.length) return;
-        skillHtml += `<div class="subject-row"><div class="subj-name">${sub}</div><div class="unit-wrap">`;
+        skillHtml += '<div class="subject-row"><div class="subj-name">' + sub + '</div><div class="unit-wrap">';
         units.forEach(u => {
           const st = skills[sub]?.[u] || null;
           const cls = st === 'toku' ? 'toku' : st === 'nigate' ? 'nigate' : st === 'futsuu' ? 'futsuu' : '';
-          skillHtml += `<button class="u-btn ${cls}" onclick="cycleUnit('${s.id}','${sub}','${u}')">${u}</button>`;
+          skillHtml += '<button class="u-btn ' + cls + '" data-action="cycle-unit" data-sid="' + s.id + '" data-sub="' + sub + '" data-unit="' + u + '">' + u + '</button>';
         });
-        skillHtml += `</div></div>`;
+        skillHtml += '</div></div>';
       });
-      skillHtml += `<div style="margin-top:12px">
-        <div class="section-label" style="margin-bottom:4px">メモ</div>
-        <textarea id="memo-area" placeholder="授業の様子・保護者連絡など">${skills.__memo||''}</textarea>
-      </div></div>`;
+      skillHtml += '<div style="margin-top:12px"><div class="section-label" style="margin-bottom:4px">メモ</div>'
+        + '<textarea id="memo-area" placeholder="授業の様子・保護者連絡など">' + (skills.__memo||'') + '</textarea>'
+        + '</div></div>';
 
       // サマリ
       let tokus = [], nigates = [];
       subjects.forEach(sub => {
-        (getUnitsForGrade(sub, s.grade)||[]).forEach(u => {
+        (getUnitsForGrade(sub, viewGrade)||[]).forEach(u => {
           const st = skills[sub]?.[u];
           if (st==='toku') tokus.push(sub+'：'+u);
           if (st==='nigate') nigates.push(sub+'：'+u);
         });
       });
       if (tokus.length || nigates.length) {
-        skillHtml += `<div class="card" style="margin-bottom:12px">`;
-        if (tokus.length) skillHtml += `<div style="margin-bottom:8px"><div style="font-size:12px;color:var(--green);margin-bottom:4px;font-weight:600">得意 (${tokus.length})</div>${tokus.map(t=>`<span class="tag toku">${t}</span>`).join('')}</div>`;
-        if (nigates.length) skillHtml += `<div><div style="font-size:12px;color:var(--red);margin-bottom:4px;font-weight:600">苦手 (${nigates.length})</div>${nigates.map(t=>`<span class="tag niga">${t}</span>`).join('')}</div>`;
-        skillHtml += `</div>`;
+        skillHtml += '<div class="card" style="margin-bottom:12px">';
+        if (tokus.length) skillHtml += '<div style="margin-bottom:8px"><div style="font-size:12px;color:var(--green);margin-bottom:4px;font-weight:600">得意 (' + tokus.length + ')</div>' + tokus.map(t=>'<span class="tag toku">'+t+'</span>').join('') + '</div>';
+        if (nigates.length) skillHtml += '<div><div style="font-size:12px;color:var(--red);margin-bottom:4px;font-weight:600">苦手 (' + nigates.length + ')</div>' + nigates.map(t=>'<span class="tag niga">'+t+'</span>').join('') + '</div>';
+        skillHtml += '</div>';
       }
 
-      skillHtml += `<div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-blue" onclick="saveKarte()">保存する</button>
-        <button class="btn btn-green" onclick="goToPrint()">プリントを選ぶ →</button>
-      </div>`;
+      skillHtml += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        + '<button class="btn btn-blue" onclick="saveKarte()">保存する</button>'
+        + '<button class="btn btn-green" onclick="goToPrint()">プリントを選ぶ →</button>'
+        + '</div>';
 
       // 再描画（生徒ボタン含む）
       let fullHtml = `<div class="section-label">生徒を選ぶ</div><div class="student-grid">`;
@@ -852,12 +872,28 @@ async function renderKarte() {
         fullHtml += `<button class="s-btn ${selectedStudent===s2.id?'active':''}" onclick="selectStudent('${s2.id}')">
           ${s2.name}<div class="grade">${s2.grade}</div></button>`;
       });
-      fullHtml += `</div>` + skillHtml;
+      fullHtml += '</div>' + skillHtml;
       el.innerHTML = fullHtml;
+
+      // イベント委任でonclickを処理
+      el.onclick = async function(e) {
+        const t = e.target.closest('[data-action]');
+        if (!t) return;
+        if (t.dataset.action === 'grade-tab') {
+          setGradeTab(t.dataset.grade);
+        } else if (t.dataset.action === 'cycle-unit') {
+          await cycleUnit(t.dataset.sid, t.dataset.sub, t.dataset.unit);
+        }
+      };
     }
   } else {
     el.innerHTML = html;
   }
+}
+
+function setGradeTab(grade) {
+  selectedGradeTab = grade;
+  renderKarte();
 }
 
 async function selectStudent(id) {
