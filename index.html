@@ -1095,6 +1095,10 @@ async function renderPrintTab() {
     if (bulkInput2) {
       bulkInput2.onchange = function() { processBulkFiles(Array.from(this.files)); };
     }
+    const bulkOpenBtn = document.getElementById('bulk-open-btn');
+    if (bulkOpenBtn) {
+      bulkOpenBtn.onclick = function(e) { e.stopPropagation(); document.getElementById('bulk-files')?.click(); };
+    }
     const dropZone2 = document.getElementById('bulk-drop-zone');
     if (dropZone2) {
       dropZone2.ondragover = e => { e.preventDefault(); dropZone2.style.borderColor='var(--blue)'; dropZone2.style.background='var(--blue-light)'; };
@@ -1204,7 +1208,7 @@ function renderBulkForm(book, books) {
     + '<div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:4px">フォルダをここにドロップ</div>'
     + '<div style="font-size:12px;color:var(--text-hint)">または</div>'
     + '<input type="file" id="bulk-files" webkitdirectory multiple accept=".pdf" style="display:none">'
-    + '<button type="button" data-action="open-bulk-files" style="margin-top:8px;padding:6px 14px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text-secondary)">フォルダを選択</button>'
+    + '<button type="button" id="bulk-open-btn" style="margin-top:8px;padding:6px 14px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text-secondary)">フォルダを選択</button>'
     + '</div>'
     + '<div id="bulk-preview" style="margin-bottom:10px"></div>'
     + '<button class="btn btn-blue" data-action="do-bulk-upload" style="width:100%">一括登録する</button>';
