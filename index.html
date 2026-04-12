@@ -92,6 +92,15 @@
   .btn-purple:active { background: #3C3489; }
   .btn-sm { padding: 7px 14px; font-size: 13px; }
 
+  /* フォルダカード */
+  .folder-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all 0.15s; }
+  .folder-card:active { transform: scale(0.98); background: var(--blue-light); }
+  .folder-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .folder-icon.book { background: #E6F1FB; }
+  .folder-icon.grade { background: #EEF6F1; }
+  .folder-icon.subject { background: #FFF5E6; }
+  .folder-icon.unit { background: #F0EEFE; }
+
   /* プリントカード */
   .print-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 13px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.15s; }
   .print-card:active { transform: scale(0.98); }
@@ -101,6 +110,13 @@
   .pc-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
   .print-card.selected .pc-name { color: #3C3489; }
   .match-badge { font-size: 11px; background: var(--green-light); color: var(--green); padding: 2px 7px; border-radius: 10px; margin-left: 6px; font-weight: 600; }
+
+  /* パンくず */
+  .breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; font-size: 13px; background: var(--bg); border-radius: var(--radius); padding: 10px 12px; border: 0.5px solid var(--border); }
+  .breadcrumb-link { color: var(--blue); cursor: pointer; font-weight: 600; }
+  .breadcrumb-link:hover { text-decoration: underline; }
+  .breadcrumb-sep { color: var(--text-hint); }
+  .breadcrumb-current { color: var(--text); font-weight: 600; }
 
   /* フォーム */
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
@@ -183,8 +199,7 @@ const SUPABASE_URL = 'https://zymqpyfasgipmetsslsa.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp5bXFweWZhc2dpcG1ldHNzbHNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2NDMwNDEsImV4cCI6MjA5MTIxOTA0MX0.UvO08tL_0WtddmIGJq9Hzuim-HnXEFeT6yQ9pirxchY';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ===== 科目・単元マスタ =====
-// ===== 時間割マスタ =====
+// ===== マスタ =====
 const DAYS = ['月','火','木','金','土'];
 const TIME_SLOTS = {
   '月': ['17:10-18:40','18:50-20:20','20:30-22:00'],
@@ -227,15 +242,6 @@ const SUBJECT_UNITS = {
   },
 };
 
-// ちびむす英語単元（中1〜3共通）
-const CHIBIMUSU_ENGLISH = [
-  'ローマ字・アルファベット','be動詞の文','英文基本・疑問文・否定文','動詞',
-  '進行形','未来形・助動詞','名詞','代名詞','冠詞','形容詞','副詞','比較',
-  '命令文','感嘆文','疑問詞','間接疑問文','付加疑問文','受身形（受動態）',
-  '現在完了','修飾という考え方','関係代名詞','不定詞','不定詞と動名詞',
-  '動詞の形の変え方のコツ','接続詞','前置詞','5文型'
-];
-
 const GRADE_SUBJECTS = {
   '小4':['算数'], '小5':['算数'], '小6':['算数'],
   '中1':['数学','英語','国語','理科','社会'],
@@ -260,8 +266,13 @@ let students = [];
 let classSlots = [];
 let selectedDay = '月';
 let selectedGradeTab = null;
-let skillCache = {}; // {studentId: {subject: {unit: status}, __memo: ''}}
+let skillCache = {};
 let prints = [];
+let printHistory = [];
+
+// printNav: 5階層ナビ
+// book → grade → subject → unitFolder → PDF一覧
+let printNav = { book: null, grade: null, subject: null, unitFolder: null };
 
 // ===== 初期化 =====
 document.getElementById('date-lbl').textContent = new Date().toLocaleDateString('ja-JP', {year:'numeric',month:'long',day:'numeric',weekday:'short'});
@@ -302,7 +313,6 @@ async function loadSkills(studentId) {
     skillCache[studentId] = map;
     return map;
   } catch(e) {
-    console.error('loadSkills error:', e);
     skillCache[studentId] = {};
     return {};
   }
@@ -312,7 +322,6 @@ async function saveSkill(studentId, subject, unit, status) {
   if (!skillCache[studentId]) skillCache[studentId] = {};
   if (!skillCache[studentId][subject]) skillCache[studentId][subject] = {};
   skillCache[studentId][subject][unit] = status;
-
   const { data: existing } = await sb.from('skill_records').select('id')
     .eq('student_id', studentId).eq('subject', subject).eq('unit', unit);
   if (existing && existing.length > 0) {
@@ -346,11 +355,11 @@ async function loadPrints() {
   }
 }
 
-let printHistory = [];
 async function loadPrintHistory() {
   const { data } = await sb.from('print_history').select('*').order('printed_at', {ascending: false});
   printHistory = data || [];
 }
+
 async function loadClassSlots() {
   try {
     const { data } = await sb.from('class_slots').select('*');
@@ -359,7 +368,6 @@ async function loadClassSlots() {
 }
 
 async function toggleClassSlot(studentId, day, slot) {
-  // 既に同じコマがあればOFF、なければON（複数コマ対応）
   const existing = classSlots.find(c => c.student_id === studentId && c.day_of_week === day && c.time_slot === slot);
   if (existing) {
     await sb.from('class_slots').delete().eq('id', existing.id);
@@ -387,14 +395,6 @@ function getStudentsInSlot(day, slot) {
   return students.filter(s => ids.includes(s.id));
 }
 
-function getUnassignedStudents() {
-  const assigned = classSlots.map(c => c.student_id);
-  return students.filter(s => !assigned.includes(s.id));
-}
-
-function getHistoryForStudent(studentId, printId) {
-  return printHistory.filter(h => h.student_id === studentId && h.print_id === printId);
-}
 async function recordPrintHistory(studentId, printIds) {
   const rows = printIds.map(pid => ({ student_id: studentId, print_id: pid, printed_at: new Date().toISOString().split('T')[0] }));
   await sb.from('print_history').insert(rows);
@@ -495,28 +495,19 @@ async function openStudentPrintPage(studentId) {
   if (!s) return;
   const el = document.getElementById('tab-schedule');
   el.innerHTML = '<div class="loading"><span class="spinner"></span>読み込み中...</div>';
-
-  // スキル・履歴読み込み
   const skills = await loadSkills(studentId);
   const subjects = GRADE_SUBJECTS[s.grade] || [];
-
-  // 苦手単元
   let nigates = [];
   subjects.forEach(sub => {
     (getUnitsForGrade(sub, s.grade)||[]).forEach(u => {
       if (skills[sub]?.[u] === 'nigate') nigates.push({sub, u});
     });
   });
-
-  // 苦手にマッチするプリント
   const matchedPrints = prints.filter(p => {
     const units = (window._printUnitsCache||[]).filter(x => x.print_id === p.id).map(x => x.unit);
     return nigates.some(n => n.sub === p.subject && (units.includes(n.u) || p.unit === n.u));
   });
-
-  // 印刷履歴（この生徒のみ）
   const history = printHistory.filter(h => h.student_id === studentId);
-
   let selectedForPrint = [];
 
   function render() {
@@ -524,13 +515,10 @@ async function openStudentPrintPage(studentId) {
     html += '<button data-action="back-schedule" style="font-size:13px;padding:6px 12px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:inherit">← 戻る</button>';
     html += '<div style="font-size:17px;font-weight:600">' + s.name + ' <span style="font-size:13px;font-weight:400;color:var(--text-hint)">' + s.grade + '</span></div>';
     html += '</div>';
-
-    // 苦手プリント
     html += '<div class="section-label">苦手に合うプリント</div>';
     if (!matchedPrints.length) {
       html += '<div style="padding:12px;color:var(--text-hint);font-size:14px;background:var(--bg);border-radius:var(--radius);margin-bottom:16px">まだプリントが登録されていません</div>';
     } else {
-      // 問題集ごとにグループ化
       const books = ['ひとつひとつわかりやすく', 'ちびむす'];
       books.forEach(book => {
         const bookPrints = matchedPrints.filter(p => p.book === book);
@@ -550,7 +538,7 @@ async function openStudentPrintPage(studentId) {
           html += '<div class="pc-name">' + p.unit;
           if (lastDate) html += '<span style="font-size:11px;background:#FAEEDA;color:#633806;padding:2px 7px;border-radius:10px;margin-left:6px;font-weight:600">渡済 ' + lastDate.slice(5).replace('-','/') + (hist.length>1?' (計'+hist.length+'回)':'') + '</span>';
           html += '</div>';
-          html += '<div class="pc-sub">' + p.subject + '</div>';
+          html += '<div class="pc-sub">' + p.subject + (p.name && p.name !== p.unit ? ' · ' + p.name : '') + '</div>';
           html += '</div>';
           if (sel) html += '<div style="color:var(--purple);font-size:18px">✓</div>';
           html += '</div>';
@@ -558,13 +546,9 @@ async function openStudentPrintPage(studentId) {
         html += '</div>';
       });
     }
-
-    // 印刷ボタン
     if (selectedForPrint.length) {
       html += '<button data-action="do-print-now" style="width:100%;padding:14px;background:var(--purple);color:#fff;border:none;border-radius:var(--radius);font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:20px">🖨 ' + selectedForPrint.length + '枚を印刷する</button>';
     }
-
-    // 印刷履歴
     html += '<div class="section-label">印刷履歴</div>';
     if (!history.length) {
       html += '<div style="padding:12px;color:var(--text-hint);font-size:14px;background:var(--bg);border-radius:var(--radius)">まだ印刷履歴がありません</div>';
@@ -575,44 +559,13 @@ async function openStudentPrintPage(studentId) {
         const p = prints.find(x => x.id === h.print_id);
         html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--border)">';
         html += '<div style="font-size:12px;color:var(--text-hint);min-width:48px">' + h.printed_at.slice(5).replace('-','/') + '</div>';
-        html += '<div style="flex:1;font-size:14px">' + (p ? p.unit : '削除済み') + '</div>';
+        html += '<div style="flex:1;font-size:14px">' + (p ? (p.name || p.unit) : '削除済み') + '</div>';
         html += '<div style="font-size:12px;color:var(--text-hint)">' + (p ? p.book : '') + '</div>';
         html += '</div>';
       });
       html += '</div>';
     }
-
     el.innerHTML = html;
-
-    // フォルダ選択イベント
-    const bulkInput = document.getElementById('bulk-files');
-    if (bulkInput) {
-      bulkInput.onchange = function() { processBulkFiles(Array.from(this.files)); };
-    }
-    // ドラッグ&ドロップ
-    const dropZone = document.getElementById('bulk-drop-zone');
-    if (dropZone) {
-      dropZone.ondragover = e => { e.preventDefault(); dropZone.style.borderColor='var(--blue)'; dropZone.style.background='var(--blue-light)'; };
-      dropZone.ondragleave = e => { dropZone.style.borderColor=''; dropZone.style.background=''; };
-      dropZone.ondrop = e => {
-        e.preventDefault();
-        dropZone.style.borderColor=''; dropZone.style.background='';
-        const files = [];
-        const traverse = (entry, path) => {
-          if (entry.isFile) {
-            entry.file(f => { f._path = path + f.name; files.push(f); if(files.length > 0) processBulkFiles(files); });
-          } else if (entry.isDirectory) {
-            const reader = entry.createReader();
-            reader.readEntries(entries => entries.forEach(en => traverse(en, path + entry.name + '/')));
-          }
-        };
-        Array.from(e.dataTransfer.items).forEach(item => {
-          const entry = item.webkitGetAsEntry();
-          if (entry) traverse(entry, '');
-        });
-      };
-    }
-
     el.onclick = async function(e) {
       const t = e.target.closest('[data-action]');
       if (!t) return;
@@ -631,23 +584,15 @@ async function openStudentPrintPage(studentId) {
       }
     };
   }
-
   render();
 }
 
 async function doPrintTargets(targets, studentId, printIds) {
-  console.log('doPrintTargets called', targets.length, 'targets:', JSON.stringify(targets.map(p=>({id:p.id,unit:p.unit,file_url:p.file_url,file_name:p.file_name}))));
   const withFile = targets.filter(p => p.file_url || p.file_name);
-  console.log('withFile:', withFile.length);
-  if (!withFile.length) {
-    toast('PDFファイルが登録されていません');
-    return;
-  }
+  if (!withFile.length) { toast('PDFファイルが登録されていません'); return; }
   for (const p of withFile) {
     try {
       let printUrl = p.file_url;
-      console.log('printUrl:', printUrl);
-      // 古いfile_data形式の場合はfetch
       if (!printUrl && p.file_name) {
         const { data } = await sb.from('prints').select('file_url,file_data').eq('id', p.id).single();
         printUrl = data?.file_url;
@@ -662,16 +607,14 @@ async function doPrintTargets(targets, studentId, printIds) {
         }
       }
       if (!printUrl) continue;
-      // iPhoneを含む全ブラウザ対応：PDFのURLを直接開く
       const win = window.open(printUrl, '_blank');
       if (!win) { toast('ポップアップを許可してください'); break; }
       await new Promise(r => setTimeout(r, 800));
-    } catch(e) { console.error(e); toast('印刷エラー: ' + e.message); }
+    } catch(e) { toast('印刷エラー: ' + e.message); }
   }
   if (studentId) await recordPrintHistory(studentId, printIds);
   toast('印刷ダイアログを開いています...');
 }
-
 
 function selectDay(day) { selectedDay = day; renderSchedule(); }
 function openKarte(sid) { selectedStudent = sid; showTab('karte'); }
@@ -710,20 +653,10 @@ async function openSlotAssign(studentId) {
 async function renderDashboard() {
   const el = document.getElementById('tab-dashboard');
   el.innerHTML = `<div class="loading"><span class="spinner"></span>全生徒のデータを読み込み中...</div>`;
-
-  if (!students.length) {
-    el.innerHTML = `<div class="empty">「生徒管理」タブで生徒を追加してください</div>`;
-    return;
-  }
-
-  // 全生徒のスキルを並行取得
+  if (!students.length) { el.innerHTML = `<div class="empty">「生徒管理」タブで生徒を追加してください</div>`; return; }
   await Promise.all(students.map(s => loadSkills(s.id)));
-
-  // フィルター状態
   const filterSubject = window._dashFilterSubject || '';
   const filterType = window._dashFilterType || 'nigate';
-
-  // 科目フィルターUI
   const allSubjects = Object.keys(SUBJECT_UNITS);
   let html = `
   <div style="margin-bottom:14px">
@@ -737,14 +670,11 @@ async function renderDashboard() {
       ${allSubjects.map(s=>`<button class="filter-btn ${filterSubject===s?'filter-active-blue':''}" onclick="setDashFilter('subject','${s}')">${s}</button>`).join('')}
     </div>
   </div>`;
-
-  // 生徒カード一覧
   let hasAny = false;
   students.forEach(s => {
     const skills = skillCache[s.id] || {};
     const subjects = GRADE_SUBJECTS[s.grade] || [];
     let tokus = [], nigates = [];
-
     subjects.forEach(sub => {
       if (filterSubject && sub !== filterSubject) return;
       (getUnitsForGrade(sub, s.grade)||[]).forEach(u => {
@@ -753,47 +683,27 @@ async function renderDashboard() {
         if (st === 'nigate') nigates.push({sub, u});
       });
     });
-
     const showToku = (filterType === 'toku' || filterType === 'both') && tokus.length > 0;
     const showNigate = (filterType === 'nigate' || filterType === 'both') && nigates.length > 0;
     if (!showToku && !showNigate) return;
     hasAny = true;
-
     html += `<div class="card" style="margin-bottom:10px;cursor:pointer" onclick="jumpToStudent('${s.id}')">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="avatar">${s.name.slice(-1)}</div>
-          <div>
-            <div style="font-size:15px;font-weight:600">${s.name}</div>
-            <div style="font-size:12px;color:var(--text-sub)">${s.grade}</div>
-          </div>
+          <div><div style="font-size:15px;font-weight:600">${s.name}</div><div style="font-size:12px;color:var(--text-sub)">${s.grade}</div></div>
         </div>
         <div style="font-size:12px;color:var(--text-hint)">タップで編集 →</div>
       </div>`;
-
     if (showNigate) {
-      html += `<div style="margin-bottom:${showToku?'8px':'0'}">
-        <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:5px">苦手 (${nigates.length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px">
-          ${nigates.map(x=>`<span class="tag niga">${x.sub}：${x.u}</span>`).join('')}
-        </div>
-      </div>`;
+      html += `<div style="margin-bottom:${showToku?'8px':'0'}"><div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:5px">苦手 (${nigates.length})</div><div style="display:flex;flex-wrap:wrap;gap:4px">${nigates.map(x=>`<span class="tag niga">${x.sub}：${x.u}</span>`).join('')}</div></div>`;
     }
     if (showToku) {
-      html += `<div>
-        <div style="font-size:11px;font-weight:600;color:var(--green);margin-bottom:5px">得意 (${tokus.length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px">
-          ${tokus.map(x=>`<span class="tag toku">${x.sub}：${x.u}</span>`).join('')}
-        </div>
-      </div>`;
+      html += `<div><div style="font-size:11px;font-weight:600;color:var(--green);margin-bottom:5px">得意 (${tokus.length})</div><div style="display:flex;flex-wrap:wrap;gap:4px">${tokus.map(x=>`<span class="tag toku">${x.sub}：${x.u}</span>`).join('')}</div></div>`;
     }
     html += `</div>`;
   });
-
-  if (!hasAny) {
-    html += `<div class="empty">該当するデータがありません。<br>カルテタブで苦手・得意を記録してください。</div>`;
-  }
-
+  if (!hasAny) html += `<div class="empty">該当するデータがありません。<br>カルテタブで苦手・得意を記録してください。</div>`;
   el.innerHTML = html;
 }
 
@@ -803,46 +713,31 @@ function setDashFilter(key, val) {
   renderDashboard();
 }
 
-function jumpToStudent(id) {
-  selectedStudent = id;
-  showTab('karte');
-}
+function jumpToStudent(id) { selectedStudent = id; showTab('karte'); }
 
 // ===== 生徒カルテタブ =====
 async function renderKarte() {
   const el = document.getElementById('tab-karte');
   let html = `<div class="section-label">生徒を選ぶ</div>`;
-  if (!students.length) {
-    html += `<div class="empty">「生徒管理」タブで生徒を追加してください</div>`;
-    el.innerHTML = html; return;
-  }
+  if (!students.length) { html += `<div class="empty">「生徒管理」タブで生徒を追加してください</div>`; el.innerHTML = html; return; }
   html += `<div class="student-grid">`;
   students.forEach(s => {
-    html += `<button class="s-btn ${selectedStudent===s.id?'active':''}" onclick="selectStudent('${s.id}')">
-      ${s.name}<div class="grade">${s.grade}</div></button>`;
+    html += `<button class="s-btn ${selectedStudent===s.id?'active':''}" onclick="selectStudent('${s.id}')">${s.name}<div class="grade">${s.grade}</div></button>`;
   });
   html += `</div>`;
-
   if (selectedStudent) {
     const s = students.find(x => x.id === selectedStudent);
     if (s) {
       el.innerHTML = html + `<div class="loading"><span class="spinner"></span>読み込み中...</div>`;
       const skills = await loadSkills(selectedStudent);
-
-      // 学年タブ：全学年表示（予習・復習対応）
       const gradePrefix = s.grade.includes('小') ? '小' : '中';
-      const availableGrades = gradePrefix === '中'
-        ? ['中1','中2','中3']
-        : ['小4','小5','小6'];
-      // 生徒が変わったら現在の学年にリセット
+      const availableGrades = gradePrefix === '中' ? ['中1','中2','中3'] : ['小4','小5','小6'];
       if (!selectedGradeTab || !availableGrades.includes(selectedGradeTab) || window._lastKarteStudent !== s.id) {
         selectedGradeTab = s.grade;
         window._lastKarteStudent = s.id;
       }
       const viewGrade = selectedGradeTab;
       const subjects = GRADE_SUBJECTS[viewGrade] || [];
-
-      // 学年タブUI
       let gradeTabs = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">';
       availableGrades.forEach(g => {
         const isActive = g === viewGrade;
@@ -853,14 +748,11 @@ async function renderKarte() {
         gradeTabs += '<button data-grade="' + g + '" data-action="grade-tab" style="padding:5px 12px;border-radius:20px;border:' + border + ';background:' + bg + ';color:' + color + ';font-weight:' + fw + ';cursor:pointer;font-family:inherit;font-size:13px">' + g + '</button>';
       });
       gradeTabs += '</div>';
-
       let skillHtml = '<div class="card">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
         + '<div style="font-size:16px;font-weight:600">' + s.name + ' <span style="font-size:13px;font-weight:400;color:var(--text-hint)">' + s.grade + '</span></div>'
         + '<div class="legend"><span><span class="dot" style="background:#1D9E75"></span>得意</span><span><span class="dot" style="background:#E24B4A"></span>苦手</span><span><span class="dot" style="background:#888780"></span>普通</span></div>'
-        + '</div>'
-        + gradeTabs;
-
+        + '</div>' + gradeTabs;
       subjects.forEach(sub => {
         const units = getUnitsForGrade(sub, viewGrade);
         if (!units.length) return;
@@ -875,8 +767,6 @@ async function renderKarte() {
       skillHtml += '<div style="margin-top:12px"><div class="section-label" style="margin-bottom:4px">メモ</div>'
         + '<textarea id="memo-area" placeholder="授業の様子・保護者連絡など">' + (skills.__memo||'') + '</textarea>'
         + '</div></div>';
-
-      // サマリ
       let tokus = [], nigates = [];
       subjects.forEach(sub => {
         (getUnitsForGrade(sub, viewGrade)||[]).forEach(u => {
@@ -891,30 +781,21 @@ async function renderKarte() {
         if (nigates.length) skillHtml += '<div><div style="font-size:12px;color:var(--red);margin-bottom:4px;font-weight:600">苦手 (' + nigates.length + ')</div>' + nigates.map(t=>'<span class="tag niga">'+t+'</span>').join('') + '</div>';
         skillHtml += '</div>';
       }
-
       skillHtml += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
         + '<button class="btn btn-blue" onclick="saveKarte()">保存する</button>'
         + '<button class="btn btn-green" onclick="goToPrint()">プリントを選ぶ →</button>'
         + '</div>';
-
-      // 再描画（生徒ボタン含む）
       let fullHtml = `<div class="section-label">生徒を選ぶ</div><div class="student-grid">`;
       students.forEach(s2 => {
-        fullHtml += `<button class="s-btn ${selectedStudent===s2.id?'active':''}" onclick="selectStudent('${s2.id}')">
-          ${s2.name}<div class="grade">${s2.grade}</div></button>`;
+        fullHtml += `<button class="s-btn ${selectedStudent===s2.id?'active':''}" onclick="selectStudent('${s2.id}')">${s2.name}<div class="grade">${s2.grade}</div></button>`;
       });
       fullHtml += '</div>' + skillHtml;
       el.innerHTML = fullHtml;
-
-      // イベント委任でonclickを処理
       el.onclick = async function(e) {
         const t = e.target.closest('[data-action]');
         if (!t) return;
-        if (t.dataset.action === 'grade-tab') {
-          setGradeTab(t.dataset.grade);
-        } else if (t.dataset.action === 'cycle-unit') {
-          await cycleUnit(t.dataset.sid, t.dataset.sub, t.dataset.unit);
-        }
+        if (t.dataset.action === 'grade-tab') setGradeTab(t.dataset.grade);
+        else if (t.dataset.action === 'cycle-unit') await cycleUnit(t.dataset.sid, t.dataset.sub, t.dataset.unit);
       };
     }
   } else {
@@ -922,15 +803,8 @@ async function renderKarte() {
   }
 }
 
-function setGradeTab(grade) {
-  selectedGradeTab = grade;
-  renderKarte();
-}
-
-async function selectStudent(id) {
-  selectedStudent = id;
-  await renderKarte();
-}
+function setGradeTab(grade) { selectedGradeTab = grade; renderKarte(); }
+async function selectStudent(id) { selectedStudent = id; await renderKarte(); }
 
 async function cycleUnit(sid, sub, unit) {
   const skills = await loadSkills(sid);
@@ -952,8 +826,13 @@ async function goToPrint() {
 }
 
 // ===== プリントタブ =====
-// フォルダナビ状態
-let printNav = { book: null, grade: null, subject: null };
+// ナビ: book → grade → subject → unitFolder → PDF一覧（5階層）
+// printsテーブルの各行:
+//   book: 問題集名
+//   grade: 学年
+//   subject: 科目
+//   unit: 単元フォルダ名（サブフォルダ名）
+//   name: PDFファイルの表示名（ファイル名から拡張子除いたもの）
 
 async function renderPrintTab() {
   const el = document.getElementById('tab-print');
@@ -964,19 +843,27 @@ async function renderPrintTab() {
     const grades = Object.keys(GRADE_SUBJECTS).filter(g => g.startsWith('中'));
 
     // パンくずナビ
-    let breadcrumb = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px;font-size:13px">';
-    breadcrumb += '<span data-action="nav-root" style="color:var(--blue);cursor:pointer;font-weight:600">プリント</span>';
+    let breadcrumb = '<div class="breadcrumb">';
+    breadcrumb += '<span data-action="nav-root" class="breadcrumb-link">📁 プリント</span>';
     if (printNav.book) {
-      breadcrumb += '<span style="color:var(--text-hint)">›</span>';
-      breadcrumb += '<span data-action="nav-book" style="color:var(--blue);cursor:pointer;font-weight:600">' + printNav.book + '</span>';
+      breadcrumb += '<span class="breadcrumb-sep">›</span>';
+      breadcrumb += '<span data-action="nav-book" class="breadcrumb-link">📚 ' + printNav.book + '</span>';
     }
     if (printNav.grade) {
-      breadcrumb += '<span style="color:var(--text-hint)">›</span>';
-      breadcrumb += '<span data-action="nav-grade" style="color:var(--blue);cursor:pointer;font-weight:600">' + printNav.grade + '</span>';
+      breadcrumb += '<span class="breadcrumb-sep">›</span>';
+      breadcrumb += '<span data-action="nav-grade" class="breadcrumb-link">🎓 ' + printNav.grade + '</span>';
     }
     if (printNav.subject) {
-      breadcrumb += '<span style="color:var(--text-hint)">›</span>';
-      breadcrumb += '<span style="color:var(--text-primary);font-weight:600">' + printNav.subject + '</span>';
+      breadcrumb += '<span class="breadcrumb-sep">›</span>';
+      if (printNav.unitFolder !== null) {
+        breadcrumb += '<span data-action="nav-subject" class="breadcrumb-link">' + subjectIcon(printNav.subject) + ' ' + printNav.subject + '</span>';
+      } else {
+        breadcrumb += '<span class="breadcrumb-current">' + subjectIcon(printNav.subject) + ' ' + printNav.subject + '</span>';
+      }
+    }
+    if (printNav.unitFolder !== null) {
+      breadcrumb += '<span class="breadcrumb-sep">›</span>';
+      breadcrumb += '<span class="breadcrumb-current">📂 ' + printNav.unitFolder + '</span>';
     }
     breadcrumb += '</div>';
 
@@ -988,22 +875,16 @@ async function renderPrintTab() {
       html += '<div style="display:grid;gap:10px;margin-bottom:20px">';
       books.forEach(b => {
         const cnt = prints.filter(p => p.book === b).length;
-        html += '<div data-action="sel-book" data-val="' + b + '" class="card" style="display:flex;align-items:center;gap:14px;cursor:pointer;padding:16px">'
-          + '<div style="width:40px;height:40px;border-radius:10px;background:#E6F1FB;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📚</div>'
+        html += '<div data-action="sel-book" data-val="' + b + '" class="folder-card">'
+          + '<div class="folder-icon book">📚</div>'
           + '<div style="flex:1"><div style="font-size:15px;font-weight:600">' + b + '</div>'
           + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + cnt + '件登録済み</div></div>'
           + '<div style="color:var(--text-hint);font-size:18px">›</div>'
           + '</div>';
       });
       html += '</div>';
-
-      // プリント追加ボタン
       html += '<button class="btn btn-blue" data-action="show-add" style="width:100%">＋ プリントを追加する</button>';
-
-      // 追加フォーム（非表示状態で保持）
-      if (window._showAddForm) {
-        html += renderAddForm();
-      }
+      if (window._showAddForm) html += renderAddForm();
     }
 
     // === レベル2: 学年選択 ===
@@ -1012,8 +893,8 @@ async function renderPrintTab() {
       html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px">';
       grades.forEach(g => {
         const cnt = prints.filter(p => p.book === printNav.book && p.grade === g).length;
-        html += '<div data-action="sel-grade" data-val="' + g + '" class="card" style="text-align:center;cursor:pointer;padding:16px 8px">'
-          + '<div style="font-size:20px;margin-bottom:6px">🎓</div>'
+        html += '<div data-action="sel-grade" data-val="' + g + '" class="folder-card" style="flex-direction:column;text-align:center;padding:16px 8px">'
+          + '<div class="folder-icon grade" style="width:48px;height:48px;margin:0 auto 8px;font-size:22px">🎓</div>'
           + '<div style="font-size:14px;font-weight:600">' + g + '</div>'
           + '<div style="font-size:11px;color:var(--text-hint);margin-top:2px">' + cnt + '件</div>'
           + '</div>';
@@ -1026,27 +907,31 @@ async function renderPrintTab() {
       const subjects = GRADE_SUBJECTS[printNav.grade] || [];
       html += '<div class="section-label">科目を選ぶ</div>';
       html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px">';
-      const subjectIcons = {'数学':'📐','英語':'🔤','国語':'📖','理科':'🔬','社会':'🌍','算数':'🔢'};
       subjects.forEach(sub => {
         const cnt = prints.filter(p => p.book === printNav.book && p.grade === printNav.grade && p.subject === sub).length;
-        html += '<div data-action="sel-subject" data-val="' + sub + '" class="card" style="text-align:center;cursor:pointer;padding:16px 8px">'
-          + '<div style="font-size:24px;margin-bottom:6px">' + (subjectIcons[sub]||'📄') + '</div>'
+        // 単元フォルダ数を数える
+        const folderSet = new Set(
+          prints.filter(p => p.book === printNav.book && p.grade === printNav.grade && p.subject === sub)
+            .map(p => p.unit).filter(u => u)
+        );
+        html += '<div data-action="sel-subject" data-val="' + sub + '" class="folder-card" style="flex-direction:column;text-align:center;padding:16px 8px">'
+          + '<div class="folder-icon subject" style="width:48px;height:48px;margin:0 auto 8px;font-size:24px">' + subjectIcon(sub) + '</div>'
           + '<div style="font-size:14px;font-weight:600">' + sub + '</div>'
-          + '<div style="font-size:11px;color:var(--text-hint);margin-top:2px">' + cnt + '件</div>'
+          + '<div style="font-size:11px;color:var(--text-hint);margin-top:2px">' + folderSet.size + '単元 / ' + cnt + '件</div>'
           + '</div>';
       });
       html += '</div>';
     }
 
-    // === レベル4: プリント一覧 ===
-    else {
+    // === レベル4: 単元フォルダ選択 ===
+    else if (printNav.unitFolder === null) {
       const filtered = prints.filter(p =>
         p.book === printNav.book &&
         p.grade === printNav.grade &&
         p.subject === printNav.subject
       );
 
-      // 苦手マッチ確認
+      // 苦手リスト取得
       let nigates = [];
       if (selectedStudent) {
         const s = students.find(x => x.id === selectedStudent);
@@ -1058,22 +943,68 @@ async function renderPrintTab() {
         }
       }
 
+      // 単元フォルダをグループ化（unit フィールドが単元フォルダ名）
+      const folderMap = {};
+      filtered.forEach(p => {
+        const folderName = p.unit || '（単元未設定）';
+        if (!folderMap[folderName]) folderMap[folderName] = [];
+        folderMap[folderName].push(p);
+      });
+
+      const folders = Object.keys(folderMap).sort();
+
+      html += '<div class="section-label">単元を選ぶ</div>';
+
       // プリント追加ボタン
       html += '<button class="btn btn-blue" data-action="show-add" style="width:100%;margin-bottom:12px">＋ プリントを追加する</button>';
       if (window._showAddForm) html += renderAddForm();
 
-      if (!filtered.length) {
+      if (!folders.length) {
         html += '<div class="empty">まだプリントが登録されていません</div>';
+      } else {
+        folders.forEach(folderName => {
+          const items = folderMap[folderName];
+          // 苦手一致チェック（単元名がnigate一覧に含まれるか）
+          const isMatch = nigates.some(n => folderName.includes(n) || n.includes(folderName));
+          html += '<div data-action="sel-unit-folder" data-val="' + escAttr(folderName) + '" class="folder-card">'
+            + '<div class="folder-icon unit">📂</div>'
+            + '<div style="flex:1;min-width:0">'
+            + '<div style="font-size:14px;font-weight:600">' + folderName
+            + (isMatch ? '<span class="match-badge">苦手一致</span>' : '')
+            + '</div>'
+            + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + items.length + '件</div>'
+            + '</div>'
+            + '<div style="color:var(--text-hint);font-size:18px">›</div>'
+            + '</div>';
+        });
+      }
+    }
+
+    // === レベル5: PDF一覧 ===
+    else {
+      const filtered = prints.filter(p =>
+        p.book === printNav.book &&
+        p.grade === printNav.grade &&
+        p.subject === printNav.subject &&
+        (p.unit || '（単元未設定）') === printNav.unitFolder
+      );
+
+      html += '<button class="btn btn-blue" data-action="show-add" style="width:100%;margin-bottom:12px">＋ プリントを追加する</button>';
+      if (window._showAddForm) html += renderAddForm();
+
+      if (!filtered.length) {
+        html += '<div class="empty">このフォルダにプリントがありません</div>';
       } else {
         filtered.forEach(p => {
           const sel = selectedPrints.includes(p.id);
-          const units = (window._printUnitsCache||[]).filter(x => x.print_id === p.id).map(x => x.unit);
-          const isMatch = nigates.length > 0 && units.some(u => nigates.includes(u));
+          const hist = printHistory.filter(h => h.print_id === p.id);
+          // nameフィールドをPDFの表示名として使用
+          const displayName = p.name || p.unit || '名称未設定';
           html += '<div class="print-card ' + (sel?'selected':'') + '" data-action="toggle-print" data-id="' + p.id + '">'
             + '<div class="pc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + (sel?'#534AB7':'#888780') + '" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>'
             + '<div style="flex:1;min-width:0">'
-            + '<div class="pc-name">' + p.unit + (isMatch ? '<span class="match-badge">苦手一致</span>' : '') + '</div>'
-            + '<div class="pc-sub">' + (units.length > 1 ? units.join('・') : '') + '</div>'
+            + '<div class="pc-name">' + displayName + '</div>'
+            + (hist.length ? '<div class="pc-sub">印刷済 ' + hist.length + '回</div>' : '<div class="pc-sub" style="color:var(--text-hint)">未印刷</div>')
             + '</div>'
             + '<button data-action="del-print" data-id="' + p.id + '" style="border:none;background:none;color:var(--text-hint);cursor:pointer;font-size:20px;padding:4px 8px;flex-shrink:0;line-height:1">×</button>'
             + '</div>';
@@ -1090,49 +1021,22 @@ async function renderPrintTab() {
 
     el.innerHTML = html;
 
-    // フォルダ選択・ドロップイベント設定
-    const bulkInput2 = document.getElementById('bulk-files');
-    if (bulkInput2) {
-      bulkInput2.onchange = function() { processBulkFiles(Array.from(this.files)); };
-    }
-    const bulkOpenBtn = document.getElementById('bulk-open-btn');
-    if (bulkOpenBtn) {
-      bulkOpenBtn.onclick = function(e) { e.stopPropagation(); document.getElementById('bulk-files')?.click(); };
-    }
-    const dropZone2 = document.getElementById('bulk-drop-zone');
-    if (dropZone2) {
-      dropZone2.ondragover = e => { e.preventDefault(); dropZone2.style.borderColor='var(--blue)'; dropZone2.style.background='var(--blue-light)'; };
-      dropZone2.ondragleave = () => { dropZone2.style.borderColor=''; dropZone2.style.background=''; };
-      dropZone2.ondrop = e => {
-        e.preventDefault();
-        dropZone2.style.borderColor=''; dropZone2.style.background='';
-        const files = [];
-        const traverse = (entry, path) => {
-          if (entry.isFile) {
-            entry.file(f => { f._path = path + f.name; files.push(f); processBulkFiles(files); });
-          } else if (entry.isDirectory) {
-            const reader = entry.createReader();
-            reader.readEntries(entries2 => entries2.forEach(en => traverse(en, path + entry.name + '/')));
-          }
-        };
-        Array.from(e.dataTransfer.items).forEach(item => {
-          const entry = item.webkitGetAsEntry();
-          if (entry) traverse(entry, '');
-        });
-      };
-    }
+    // ドロップ・ファイル選択イベント設定
+    setupBulkDropZone(el);
 
     // イベント委任
     el.onclick = async function(e) {
       const t = e.target.closest('[data-action]');
       if (!t) return;
       const action = t.dataset.action;
-      if (action === 'nav-root') { printNav = {book:null,grade:null,subject:null}; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'nav-book') { printNav.grade=null; printNav.subject=null; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'nav-grade') { printNav.subject=null; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'sel-book') { printNav.book=t.dataset.val; await renderPrintTab(); }
-      else if (action === 'sel-grade') { printNav.grade=t.dataset.val; await renderPrintTab(); }
-      else if (action === 'sel-subject') { printNav.subject=t.dataset.val; await renderPrintTab(); }
+      if (action === 'nav-root') { printNav = {book:null,grade:null,subject:null,unitFolder:null}; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-book') { printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-grade') { printNav.subject=null; printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-subject') { printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'sel-book') { printNav.book=t.dataset.val; printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-grade') { printNav.grade=t.dataset.val; printNav.subject=null; printNav.unitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-subject') { printNav.subject=t.dataset.val; printNav.unitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-unit-folder') { printNav.unitFolder=t.dataset.val; await renderPrintTab(); }
       else if (action === 'show-add') { window._showAddForm=!window._showAddForm; await renderPrintTab(); }
       else if (action === 'toggle-print') {
         const idx = selectedPrints.indexOf(t.dataset.id);
@@ -1150,11 +1054,7 @@ async function renderPrintTab() {
       }
       else if (action === 'do-print') { await doPrint(); }
       else if (action === 'add-print') { await addPrintFromForm(); }
-      else if (action === 'toggle-add-mode') {
-        window._bulkMode = t.dataset.mode === 'bulk';
-        window._bulkFiles = [];
-        await renderPrintTab();
-      }
+      else if (action === 'toggle-add-mode') { window._bulkMode = t.dataset.mode === 'bulk'; window._bulkFiles = []; await renderPrintTab(); }
       else if (action === 'do-bulk-upload') { await doBulkUpload(); }
       else if (action === 'open-bulk-files') { document.getElementById('bulk-files')?.click(); }
     };
@@ -1165,10 +1065,48 @@ async function renderPrintTab() {
   }
 }
 
+function subjectIcon(sub) {
+  return {'数学':'📐','英語':'🔤','国語':'📖','理科':'🔬','社会':'🌍','算数':'🔢'}[sub] || '📄';
+}
+
+function escAttr(str) {
+  return (str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function setupBulkDropZone(el) {
+  const bulkInput = document.getElementById('bulk-files');
+  if (bulkInput) bulkInput.onchange = function() { processBulkFiles(Array.from(this.files)); };
+  const bulkOpenBtn = document.getElementById('bulk-open-btn');
+  if (bulkOpenBtn) bulkOpenBtn.onclick = function(e) { e.stopPropagation(); document.getElementById('bulk-files')?.click(); };
+  const dropZone = document.getElementById('bulk-drop-zone');
+  if (dropZone) {
+    dropZone.ondragover = e => { e.preventDefault(); dropZone.style.borderColor='var(--blue)'; dropZone.style.background='var(--blue-light)'; };
+    dropZone.ondragleave = () => { dropZone.style.borderColor=''; dropZone.style.background=''; };
+    dropZone.ondrop = e => {
+      e.preventDefault();
+      dropZone.style.borderColor=''; dropZone.style.background='';
+      const files = [];
+      const traverse = (entry, path) => {
+        if (entry.isFile) {
+          entry.file(f => { f._path = path + f.name; files.push(f); processBulkFiles(files); });
+        } else if (entry.isDirectory) {
+          const reader = entry.createReader();
+          reader.readEntries(entries => entries.forEach(en => traverse(en, path + entry.name + '/')));
+        }
+      };
+      Array.from(e.dataTransfer.items).forEach(item => {
+        const entry = item.webkitGetAsEntry();
+        if (entry) traverse(entry, '');
+      });
+    };
+  }
+}
+
 function renderAddForm() {
   const book = printNav.book || '';
   const grade = printNav.grade || '';
   const subject = printNav.subject || '';
+  const unitFolder = printNav.unitFolder || '';
   const books = ['ひとつひとつわかりやすく', 'ちびむす'];
   const grades = Object.keys(GRADE_SUBJECTS).filter(g => g.startsWith('中'));
   const subjects = Object.keys(SUBJECT_UNITS);
@@ -1178,11 +1116,11 @@ function renderAddForm() {
     + '<button class="filter-btn ' + (!window._bulkMode?'filter-active-blue':'') + '" data-action="toggle-add-mode" data-mode="single">1件追加</button>'
     + '<button class="filter-btn ' + (window._bulkMode?'filter-active-blue':'') + '" data-action="toggle-add-mode" data-mode="bulk">📁 フォルダ一括</button>'
     + '</div>'
-    + (window._bulkMode ? renderBulkForm(book, books) : renderSingleForm(book, grade, subject, books, grades, subjects))
+    + (window._bulkMode ? renderBulkForm(book, books) : renderSingleForm(book, grade, subject, unitFolder, books, grades, subjects))
     + '</div>';
 }
 
-function renderSingleForm(book, grade, subject, books, grades, subjects) {
+function renderSingleForm(book, grade, subject, unitFolder, books, grades, subjects) {
   return '<div style="font-size:13px;font-weight:600;margin-bottom:10px">1件追加</div>'
     + '<div class="form-grid" style="margin-bottom:8px">'
     + '<select id="pbook"><option value="">問題集</option>' + books.map(b => '<option' + (b===book?' selected':'') + '>' + b + '</option>').join('') + '</select>'
@@ -1190,123 +1128,158 @@ function renderSingleForm(book, grade, subject, books, grades, subjects) {
     + '</div>'
     + '<div class="form-grid" style="margin-bottom:8px">'
     + '<select id="psubject"><option value="">科目</option>' + subjects.map(s => '<option' + (s===subject?' selected':'') + '>' + s + '</option>').join('') + '</select>'
-    + '<input type="text" id="punit" placeholder="単元名（例：be動詞）">'
+    + '<input type="text" id="punit" placeholder="単元フォルダ名（例：be動詞）" value="' + escAttr(unitFolder) + '">'
     + '</div>'
+    + '<div style="margin-bottom:8px"><input type="text" id="pname" placeholder="PDF表示名（例：問題1）"></div>'
     + '<div style="margin-bottom:10px"><div style="font-size:12px;color:var(--text-hint);margin-bottom:6px">PDFまたは画像（省略可）</div>'
     + '<input type="file" id="pfile" accept=".pdf,image/*"></div>'
     + '<button class="btn btn-blue" data-action="add-print">追加する</button>';
 }
 
 function renderBulkForm(book, books) {
-  return '<div style="font-size:13px;font-weight:600;margin-bottom:8px">フォルダ一括アップロード</div>'
-    + '<div style="font-size:12px;color:var(--text-hint);margin-bottom:10px">フォルダ構造：学年/科目/単元.pdf</div>'
+  return '<div style="font-size:13px;font-weight:600;margin-bottom:4px">フォルダ一括アップロード</div>'
+    + '<div style="font-size:12px;color:var(--text-hint);margin-bottom:10px">フォルダ構造：問題集/学年/科目/<strong>単元フォルダ</strong>/PDF.pdf</div>'
     + '<div style="margin-bottom:10px">'
     + '<select id="pbookbulk" style="width:100%;margin-bottom:8px"><option value="">問題集を選ぶ</option>' + books.map(b => '<option' + (b===book?' selected':'') + '>' + b + '</option>').join('') + '</select>'
     + '</div>'
     + '<div id="bulk-drop-zone" style="border:2px dashed var(--border-md);border-radius:var(--radius-lg);padding:32px 16px;text-align:center;cursor:pointer;transition:all 0.2s;margin-bottom:10px">'
     + '<div style="font-size:32px;margin-bottom:8px">📁</div>'
-    + '<div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:4px">フォルダをここにドロップ</div>'
+    + '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">フォルダをここにドロップ</div>'
     + '<div style="font-size:12px;color:var(--text-hint)">または</div>'
     + '<input type="file" id="bulk-files" webkitdirectory multiple accept=".pdf" style="display:none">'
-    + '<button type="button" id="bulk-open-btn" style="margin-top:8px;padding:6px 14px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text-secondary)">フォルダを選択</button>'
+    + '<button type="button" id="bulk-open-btn" style="margin-top:8px;padding:6px 14px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:transparent;cursor:pointer;font-family:inherit;font-size:13px;color:var(--text-sub)">フォルダを選択</button>'
     + '</div>'
     + '<div id="bulk-preview" style="margin-bottom:10px"></div>'
     + '<button class="btn btn-blue" data-action="do-bulk-upload" style="width:100%">一括登録する</button>';
 }
 
+// ===== フォルダパース（5階層対応）=====
+// 想定パス例: 中1/英語/be動詞/問題1.pdf
+//             ちびむす/中2/数学/連立方程式/基礎問題.pdf
+function parseBulkPath(path) {
+  const parts = (path || '').replace(/\\/g, '/').split('/').filter(p => p);
+  if (parts.length < 1) return { grade: null, subject: null, unitFolder: null, displayName: null };
+
+  const fileName = parts[parts.length - 1];
+  // 拡張子除去 + 連番除去（"1. be動詞" → "be動詞"）
+  const displayName = fileName.replace(/\.[^.]+$/, '').replace(/^\d+[\.\s_\-]+/, '').trim();
+
+  const gradeKeys = Object.keys(GRADE_SUBJECTS);
+  const subjectKeys = Object.keys(SUBJECT_UNITS);
+
+  let grade = null, subject = null, unitFolder = null;
+
+  // パスの各パーツから学年・科目を推定
+  parts.forEach(p => {
+    if (!grade) {
+      const g = gradeKeys.find(g => p === g || p.includes(g));
+      if (g) grade = g;
+    }
+    if (!subject) {
+      const s = subjectKeys.find(s => p === s || p.includes(s));
+      if (s) subject = s;
+    }
+  });
+
+  // 正規表現フォールバック
+  if (!grade) {
+    const m = path.match(/(中|小)[1-6]/);
+    if (m) grade = m[0];
+  }
+  if (!subject) {
+    const subMap = {'数学':'数学','英語':'英語','国語':'国語','理科':'理科','社会':'社会','算数':'算数'};
+    Object.keys(subMap).forEach(k => { if (!subject && path.includes(k)) subject = subMap[k]; });
+  }
+
+  // 単元フォルダ：ファイルの1つ上のフォルダ（ファイルを除いた最後のパーツ）
+  // ただしそのフォルダが学年や科目や問題集名でない場合のみ
+  if (parts.length >= 2) {
+    const parentFolder = parts[parts.length - 2];
+    // 学年・科目・問題集名でなければ単元フォルダとみなす
+    const isGradeOrSubject = gradeKeys.includes(parentFolder)
+      || subjectKeys.includes(parentFolder)
+      || ['ひとつひとつわかりやすく','ちびむす'].includes(parentFolder)
+      || /^(中|小)[1-6]$/.test(parentFolder);
+    if (!isGradeOrSubject) {
+      unitFolder = parentFolder;
+    }
+  }
+
+  return { grade, subject, unitFolder, displayName };
+}
+
 function processBulkFiles(files) {
-  window._bulkFiles = files.filter(f => f.name.endsWith('.pdf') || f.name.match(/\.(jpg|jpeg|png)$/i));
+  window._bulkFiles = files.filter(f => f.name.match(/\.(pdf|jpg|jpeg|png)$/i));
   const preview = document.getElementById('bulk-preview');
   if (!preview) return;
   if (!window._bulkFiles.length) {
     preview.innerHTML = '<div style="color:var(--text-hint);font-size:13px">PDFファイルが見つかりません</div>';
     return;
   }
-  // ファイルパスから学年・科目・単元を解析
   const parsed = window._bulkFiles.map(f => parseBulkPath(f._path || f.webkitRelativePath || f.name));
-  preview.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">' + window._bulkFiles.length + '件を検出</div>'
-    + '<div style="max-height:200px;overflow-y:auto;border:0.5px solid var(--border-tertiary);border-radius:var(--radius);padding:8px">'
-    + parsed.map((p, i) => '<div style="font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border-tertiary);display:flex;gap:8px;align-items:center">'
+  preview.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text-sub);margin-bottom:8px">' + window._bulkFiles.length + '件を検出</div>'
+    + '<div style="max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:8px">'
+    + parsed.map((p, i) => '<div style="font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border);display:flex;gap:8px;align-items:center">'
       + '<span style="color:var(--text-hint);min-width:32px">' + (i+1) + '.</span>'
-      + '<span style="flex:1">' + (p.grade||'?') + ' / ' + (p.subject||'?') + ' / ' + (p.unit||'?') + '</span>'
+      + '<span style="flex:1">'
+      + (p.grade||'?') + ' / ' + (p.subject||'?') + ' / '
+      + '<strong>' + (p.unitFolder||'（単元なし）') + '</strong>'
+      + ' / ' + (p.displayName||'?')
+      + '</span>'
       + '</div>').join('')
     + '</div>';
-}
-
-function parseBulkPath(path) {
-  // パターン: 学年/科目/ファイル名.pdf または 学年/科目/連番.単元名.pdf
-  const parts = (path || '').replace(/[\\]/g, '/').split('/').filter(p => p);
-  const fileName = parts[parts.length - 1].replace(/\.[^.]+$/, '');
-  // 連番除去（例：「1. be動詞」→「be動詞」）
-  const unit = fileName.replace(/^\d+[\.\s_-]+/, '').replace(/答え$/, '').trim();
-  
-  // 学年・科目を推定
-  let grade = null, subject = null;
-  const gradeKeys = Object.keys(GRADE_SUBJECTS);
-  const subjectKeys = Object.keys(SUBJECT_UNITS);
-  
-  parts.forEach(p => {
-    if (gradeKeys.some(g => p.includes(g.replace('中','中').replace('小','小')))) {
-      const match = gradeKeys.find(g => p.includes(g));
-      if (match) grade = match;
-    }
-    if (subjectKeys.some(s => p.includes(s))) {
-      const match = subjectKeys.find(s => p.includes(s));
-      if (match) subject = match;
-    }
-  });
-
-  // パスから直接推定
-  if (!grade) {
-    const gradeMatch = path.match(/(中|小)[1-6]/);
-    if (gradeMatch) grade = gradeMatch[0];
-  }
-  if (!subject) {
-    const subMap = {'数学':'数学','英語':'英語','国語':'国語','理科':'理科','社会':'社会','算数':'算数'};
-    Object.keys(subMap).forEach(k => { if (path.includes(k)) subject = subMap[k]; });
-  }
-  
-  return { grade, subject, unit, fileName };
 }
 
 async function doBulkUpload() {
   const book = document.getElementById('pbookbulk')?.value;
   if (!book) { toast('問題集を選んでください'); return; }
   if (!window._bulkFiles?.length) { toast('ファイルを選択してください'); return; }
-  
+
   let success = 0, fail = 0;
   toast('一括登録中... 0/' + window._bulkFiles.length);
-  
+
   for (let i = 0; i < window._bulkFiles.length; i++) {
     const f = window._bulkFiles[i];
     const parsed = parseBulkPath(f._path || f.webkitRelativePath || f.name);
-    
-    if (!parsed.grade || !parsed.subject || !parsed.unit) { fail++; continue; }
-    
+
+    if (!parsed.grade || !parsed.subject) { fail++; continue; }
+
+    // unitFolder が null の場合は「単元未設定」
+    const unitFolderName = parsed.unitFolder || '（単元未設定）';
+    const displayName = parsed.displayName || f.name.replace(/\.[^.]+$/, '');
+
     try {
-      // Storage upload
       const ext = f.name.split('.').pop().toLowerCase();
       const filePath = Date.now() + '_' + i + '.' + ext;
       const { error: upErr } = await sb.storage.from('prints').upload(filePath, f, { upsert: true });
       if (upErr) { fail++; continue; }
-      
+
       const { data: urlData } = sb.storage.from('prints').getPublicUrl(filePath);
       const fileUrl = urlData.publicUrl;
-      const name = book + ' ' + parsed.subject + ' ' + parsed.unit;
-      
+
+      // unit = 単元フォルダ名, name = PDF表示名
       const { data: newPrint, error } = await sb.from('prints')
-        .insert({ name, subject: parsed.subject, unit: parsed.unit, grade: parsed.grade, book, file_url: fileUrl, file_name: f.name })
+        .insert({
+          name: displayName,
+          subject: parsed.subject,
+          unit: unitFolderName,
+          grade: parsed.grade,
+          book,
+          file_url: fileUrl,
+          file_name: f.name
+        })
         .select().single();
-      
+
       if (!error && newPrint) {
-        await sb.from('print_units').insert({ print_id: newPrint.id, subject: parsed.subject, unit: parsed.unit });
+        // print_unitsには単元フォルダ名を登録（苦手マッチング用）
+        await sb.from('print_units').insert({ print_id: newPrint.id, subject: parsed.subject, unit: unitFolderName });
         success++;
       } else { fail++; }
     } catch(e) { fail++; }
-    
+
     if ((i+1) % 3 === 0) toast('一括登録中... ' + (i+1) + '/' + window._bulkFiles.length);
   }
-  
+
   await loadPrints();
   window._bulkFiles = [];
   window._bulkMode = false;
@@ -1319,79 +1292,37 @@ async function addPrintFromForm() {
   const book = document.getElementById('pbook')?.value;
   const grade = document.getElementById('pgrade')?.value;
   const subject = document.getElementById('psubject')?.value;
-  const unit = document.getElementById('punit')?.value.trim();
+  const unit = document.getElementById('punit')?.value.trim(); // 単元フォルダ名
+  const pname = document.getElementById('pname')?.value.trim(); // PDF表示名
   const file = document.getElementById('pfile')?.files[0];
-  if (!book || !grade || !subject || !unit) { toast('全項目を入力してください'); return; }
+  if (!book || !grade || !subject || !unit) { toast('問題集・学年・科目・単元フォルダ名を入力してください'); return; }
+  const displayName = pname || unit;
 
   toast('追加中...');
   let fileUrl = null, fileName = null;
 
   if (file) {
-    // Supabase Storageにアップロード
-    // ファイルパスは英数字のみ（日本語を除去）
     const ext = file.name.split('.').pop().toLowerCase();
-    const safeId = Date.now().toString();
-    const filePath = safeId + '.' + ext;
-    const { data: uploadData, error: uploadError } = await sb.storage.from('prints').upload(filePath, file, { upsert: true });
-    if (uploadError) {
-      toast('ファイルアップロードエラー: ' + uploadError.message);
-      return;
-    }
+    const filePath = Date.now() + '.' + ext;
+    const { error: uploadError } = await sb.storage.from('prints').upload(filePath, file, { upsert: true });
+    if (uploadError) { toast('ファイルアップロードエラー: ' + uploadError.message); return; }
     const { data: urlData } = sb.storage.from('prints').getPublicUrl(filePath);
     fileUrl = urlData.publicUrl;
     fileName = file.name;
   }
 
-  const name = book + ' ' + subject + ' ' + unit;
-  const { data: newPrint, error } = await sb.from('prints').insert({ name, subject, unit, grade, book, file_url: fileUrl, file_name: fileName }).select().single();
+  // unit = 単元フォルダ名, name = PDF表示名
+  const { data: newPrint, error } = await sb.from('prints')
+    .insert({ name: displayName, subject, unit, grade, book, file_url: fileUrl, file_name: fileName })
+    .select().single();
   if (error) { toast('登録エラー: ' + error.message); return; }
 
-  const unitTags = unit.split(/[,、／・]/).map(u => u.trim()).filter(u => u);
-  if (unitTags.length > 0) {
-    await sb.from('print_units').insert(unitTags.map(u => ({ print_id: newPrint.id, subject, unit: u })));
-  }
+  await sb.from('print_units').insert({ print_id: newPrint.id, subject, unit });
+
   await loadPrints();
   window._showAddForm = false;
-  printNav = { book, grade, subject };
-  toast('追加しました：' + unit);
-  await renderPrintTab();
-}
-
-
-function printCardHtml(p, sel, isMatch) {
-  return `<div class="print-card ${sel?'selected':''}" onclick="togglePrint('${p.id}')">
-    <div class="pc-icon">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${sel?'#534AB7':'#888780'}" stroke-width="2">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-      </svg>
-    </div>
-    <div style="flex:1;min-width:0">
-      <div class="pc-name">${p.name}${isMatch?'<span class="match-badge">苦手一致</span>':''}</div>
-      <div class="pc-sub">${p.book?'<span style="background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:8px;font-size:11px;margin-right:4px;font-weight:600;">'+p.book+'</span>':''} ${p.subject||''} ${p.unit?' / '+p.unit:''} ${p.grade?'· '+p.grade:''}</div>
-    </div>
-    <button onclick="event.stopPropagation();deletePrint('${p.id}')" style="border:none;background:none;color:var(--text-hint);cursor:pointer;font-size:20px;padding:4px 8px;flex-shrink:0;line-height:1">×</button>
-  </div>`;
-}
-
-
-
-function setBookFilter(book) {
-  window._filterBook = book;
-  renderPrintTab();
-}
-
-async function togglePrint(id) {
-  const idx = selectedPrints.indexOf(id);
-  if (idx >= 0) selectedPrints.splice(idx, 1);
-  else selectedPrints.push(id);
-  await renderPrintTab();
-}
-
-async function deletePrint(id) {
-  await sb.from('prints').delete().eq('id', id);
-  prints = prints.filter(p => p.id !== id);
-  selectedPrints = selectedPrints.filter(x => x !== id);
-  toast('削除しました');
+  printNav = { book, grade, subject, unitFolder: unit };
+  toast('追加しました：' + displayName);
   await renderPrintTab();
 }
 
@@ -1402,12 +1333,10 @@ async function doPrint() {
   await renderPrintTab();
 }
 
-
 // ===== 生徒管理タブ =====
 function renderStudentsTab() {
   const el = document.getElementById('tab-students');
   window._newSlotSelected = window._newSlotSelected || {};
-
   const gradeOpts = Object.keys(GRADE_SUBJECTS).map(g => '<option>' + g + '</option>').join('');
 
   let html = '<div class="section-label">新しい生徒を追加</div>'
@@ -1424,15 +1353,12 @@ function renderStudentsTab() {
     + '</div>';
 
   html += '<div class="section-label">登録済み生徒（' + students.length + '名）</div>';
-
   if (!students.length) {
     html += '<div class="empty">まだ生徒が登録されていません</div>';
   } else {
     students.forEach(s => {
       const slots = getSlotsForStudent(s.id);
-      const slotText = slots.length
-        ? slots.map(c => c.day_of_week + '曜 ' + c.time_slot).join('　')
-        : 'コマ未設定';
+      const slotText = slots.length ? slots.map(c => c.day_of_week + '曜 ' + c.time_slot).join('　') : 'コマ未設定';
       const gradeOpts2 = Object.keys(GRADE_SUBJECTS).map(g => '<option' + (g===s.grade?' selected':'') + '>' + g + '</option>').join('');
       html += '<div class="card" style="margin-bottom:10px">'
         + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">'
@@ -1442,8 +1368,7 @@ function renderStudentsTab() {
         + '<div style="display:flex;align-items:center;gap:6px;margin-top:4px">'
         + '<select id="grade-sel-' + s.id + '" style="font-size:12px;padding:3px 6px;border:0.5px solid var(--border-md);border-radius:var(--radius);background:var(--bg);color:var(--text-sub);font-family:inherit">' + gradeOpts2 + '</select>'
         + '<button class="btn btn-outline btn-sm" data-action="change-grade" data-id="' + s.id + '" style="font-size:11px;padding:4px 8px">変更</button>'
-        + '</div>'
-        + '</div>'
+        + '</div></div>'
         + '<button class="btn btn-red btn-sm" data-action="del" data-id="' + s.id + '">削除</button>'
         + '</div>'
         + '<div style="font-size:12px;color:' + (slots.length ? 'var(--blue-dark)' : 'var(--text-hint)') + ';margin-bottom:8px">'
@@ -1488,7 +1413,7 @@ function buildSlotGrid(selectedMap) {
   let html = '';
   DAYS.forEach(d => {
     html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-      + '<span style="font-size:12px;font-weight:600;color:var(--text-secondary);min-width:28px">' + d + '曜</span>';
+      + '<span style="font-size:12px;font-weight:600;color:var(--text-sub);min-width:28px">' + d + '曜</span>';
     (TIME_SLOTS[d]||[]).forEach(slot => {
       const key = d + '|' + slot;
       const isActive = selectedMap && selectedMap[key];
@@ -1499,12 +1424,11 @@ function buildSlotGrid(selectedMap) {
   return html;
 }
 
-
 async function openSlotAssignInStudents(studentId) {
   const s = students.find(x => x.id === studentId);
   if (!s) return;
   const el = document.getElementById('tab-students');
-  
+
   function render() {
     const currentSlots = getSlotsForStudent(studentId);
     let html = '<div style="margin-bottom:16px"><button class="btn btn-outline btn-sm" data-action="backtostudents">← 戻る</button></div>';
@@ -1512,7 +1436,7 @@ async function openSlotAssignInStudents(studentId) {
     html += '<div style="font-size:12px;color:var(--text-hint);margin-bottom:16px">タップでON/OFF（複数選択可）</div>';
     DAYS.forEach(d => {
       html += '<div style="margin-bottom:12px">';
-      html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">' + d + '曜日</div>';
+      html += '<div style="font-size:13px;font-weight:600;color:var(--text-sub);margin-bottom:6px">' + d + '曜日</div>';
       html += '<div style="display:grid;gap:6px">';
       (TIME_SLOTS[d]||[]).forEach(slot => {
         const isActive = currentSlots.some(c => c.day_of_week === d && c.time_slot === slot);
@@ -1525,15 +1449,10 @@ async function openSlotAssignInStudents(studentId) {
   }
 
   render();
-
   el.onclick = async function(e) {
     const t = e.target.closest('[data-action]');
     if (!t) return;
-    if (t.dataset.action === 'backtostudents') {
-      el.onclick = null;
-      renderStudentsTab();
-      return;
-    }
+    if (t.dataset.action === 'backtostudents') { el.onclick = null; renderStudentsTab(); return; }
     if (t.dataset.action === 'setslot') {
       await toggleClassSlot(t.dataset.sid, t.dataset.day, t.dataset.slot);
       render();
@@ -1542,7 +1461,6 @@ async function openSlotAssignInStudents(studentId) {
   };
 }
 
-
 async function addStudent() {
   const name = document.getElementById('new-name').value.trim();
   const grade = document.getElementById('new-grade').value;
@@ -1550,7 +1468,6 @@ async function addStudent() {
   const { data: newStudent, error } = await sb.from('students').insert({ name, grade }).select().single();
   if (error) { toast('エラーが発生しました'); return; }
   await loadStudents();
-  // 選択されたコマを登録
   const selected = window._newSlotSelected || {};
   for (const key of Object.keys(selected)) {
     const [day, slot] = key.split('|');
