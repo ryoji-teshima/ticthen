@@ -308,6 +308,8 @@ async function init() {
     await loadPrints();
     await loadPrintHistory();
     await loadClassSlots();
+    // 全生徒のスキルを起動時に一括ロード（時間割の苦手表示に必要）
+    await Promise.all(students.map(s => loadSkills(s.id)));
     document.getElementById('sync-badge').textContent = 'クラウド同期済';
     document.getElementById('sync-badge').className = 'sync-badge';
   } catch(e) {
