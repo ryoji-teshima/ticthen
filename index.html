@@ -1221,46 +1221,41 @@ function renderBulkForm(book, books) {
 }
 
 // ===== フォルダパース =====
-// フォルダ構造をそのまま反映する
-// 例1（小単元あり）: 数学/文字式/文字の使用/問題.pdf
-//   → grade=中1(別途), subject=数学, unit=文字式, subUnit=文字の使用, displayName=問題
-// 例2（小単元なし）: 数学/正負の足し算・引き算/問題.pdf
-//   → grade=中1(別途), subject=数学, unit=正負の足し算・引き算, subUnit=null, displayName=問題
-// 除外ワード: 問題集名・学年・科目名はフォルダとして扱わない
+// webkitRelativePath の例:
+//   中1/数学/平面図形/円とおうぎ形/円とおうぎ形.pdf
+//     → grade=中1, subject=数学, unit=平面図形, subUnit=円とおうぎ形, displayName=円とおうぎ形
+//   中1/数学/正負の足し算・引き算/正負の足し算・引き算.pdf
+//     → grade=中1, subject=数学, unit=正負の足し算・引き算, subUnit=null, displayName=正負の足し算・引き算
 function parseBulkPath(path) {
-  const SKIP_WORDS = ['ひとつひとつわかりやすく', 'ちびむす'];
-  const gradeKeys = Object.keys(GRADE_SUBJECTS);
-  const subjectKeys = Object.keys(SUBJECT_UNITS);
+  const BOOK_NAMES = ['ひとつひとつわかりやすく', 'ちびむす'];
+  const GRADE_PATTERN = /^(中|小)[1-6]$/;
+  const subjectKeys = Object.keys(SUBJECT_UNITS); // ['数学','英語','国語','理科','社会','算数']
 
   const parts = (path || '').replace(/\\/g, '/').split('/').filter(p => p);
-  if (parts.length < 1) return { grade: null, subject: null, unit: null, subUnit: null, displayName: null };
+  if (parts.length < 2) return { grade: null, subject: null, unit: null, subUnit: null, displayName: null };
 
+  // ファイル名（最後のパーツ）
   const fileName = parts[parts.length - 1];
   const displayName = fileName.replace(/\.[^.]+$/, '').replace(/^\d+[\.\s_\-]+/, '').trim();
 
-  // ファイルを除いたフォルダ部分
+  // フォルダ部分のみ（ファイルを除く）
   const folders = parts.slice(0, -1);
 
+  // 各フォルダを分類
   let grade = null, subject = null;
+  const unitFolders = []; // 大単元・小単元候補
 
-  // 学年・科目・除外ワードを除いた「意味のあるフォルダ」だけ抽出
-  const meaningfulFolders = [];
-  folders.forEach(p => {
-    if (SKIP_WORDS.includes(p)) return;
-    if (gradeKeys.includes(p) || /^(中|小)[1-6]$/.test(p)) { if (!grade) grade = p; return; }
-    if (subjectKeys.includes(p)) { if (!subject) subject = p; return; }
-    meaningfulFolders.push(p);
-  });
-
-  // フォールバック：パス文字列から学年・科目を推定
-  if (!grade) { const m = path.match(/(中|小)[1-6]/); if (m) grade = m[0]; }
-  if (!subject) {
-    subjectKeys.forEach(k => { if (!subject && path.includes(k)) subject = k; });
+  for (const f of folders) {
+    if (BOOK_NAMES.includes(f)) continue; // 問題集名はスキップ
+    if (GRADE_PATTERN.test(f)) { grade = f; continue; } // 学年
+    if (subjectKeys.includes(f)) { subject = f; continue; } // 科目
+    // それ以外は単元フォルダ
+    unitFolders.push(f);
   }
 
-  // meaningfulFolders[0] = 大単元(unit), [1] = 小単元(subUnit)
-  const unit = meaningfulFolders[0] || null;
-  const subUnit = meaningfulFolders[1] || null;
+  // unitFolders[0]=大単元, unitFolders[1]=小単元
+  const unit = unitFolders[0] || null;
+  const subUnit = unitFolders[1] || null;
 
   return { grade, subject, unit, subUnit, displayName };
 }
