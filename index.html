@@ -242,6 +242,30 @@ const SUBJECT_UNITS = {
   },
 };
 
+// ===== 大単元→小単元マスタ（2階層対応が必要な問題集・科目用）=====
+// キー: `${book}__${grade}__${subject}`
+// 値: { 大単元名: [小単元名, ...] } （小単元なしの場合は空配列）
+const SUB_UNIT_MAP = {
+  'ちびむす__中1__数学': {
+    '正負の足し算・引き算': [],
+    '正負のかけ算・割り算': [],
+    '文字式': ['文字の使用', '1次式の計算', '数量の関係を表す式'],
+    '方程式': ['方程式', '方程式の活用'],
+    '比例と反比例': ['比例', '反比例', '比例、反比例の活用'],
+    '平面図形': ['円とおうぎ形', '平面図形の移動'],
+    '空間図形': ['いろいろな立体', '立体の表し方', '立体の体積・表面積'],
+    'データの活用': [],
+  },
+};
+
+// 大単元に小単元があるか確認
+function getSubUnits(book, grade, subject, unitFolder) {
+  const key = book + '__' + grade + '__' + subject;
+  const map = SUB_UNIT_MAP[key];
+  if (!map || !(unitFolder in map)) return null; // マスタなし→小単元なし扱い
+  return map[unitFolder]; // 空配列なら小単元なし
+}
+
 const GRADE_SUBJECTS = {
   '小4':['算数'], '小5':['算数'], '小6':['算数'],
   '中1':['数学','英語','国語','理科','社会'],
@@ -270,9 +294,10 @@ let skillCache = {};
 let prints = [];
 let printHistory = [];
 
-// printNav: 5階層ナビ
-// book → grade → subject → unitFolder → PDF一覧
-let printNav = { book: null, grade: null, subject: null, unitFolder: null };
+// printNav: 6階層ナビ
+// book → grade → subject → unitFolder(大単元) → subUnitFolder(小単元) → PDF一覧
+// subUnitFolder: null=未選択, ''=小単元なし（直接PDF）, 文字列=小単元名
+let printNav = { book: null, grade: null, subject: null, unitFolder: null, subUnitFolder: null };
 
 // ===== 初期化 =====
 document.getElementById('date-lbl').textContent = new Date().toLocaleDateString('ja-JP', {year:'numeric',month:'long',day:'numeric',weekday:'short'});
@@ -855,15 +880,17 @@ async function renderPrintTab() {
     }
     if (printNav.subject) {
       breadcrumb += '<span class="breadcrumb-sep">›</span>';
-      if (printNav.unitFolder !== null) {
-        breadcrumb += '<span data-action="nav-subject" class="breadcrumb-link">' + subjectIcon(printNav.subject) + ' ' + printNav.subject + '</span>';
-      } else {
-        breadcrumb += '<span class="breadcrumb-current">' + subjectIcon(printNav.subject) + ' ' + printNav.subject + '</span>';
-      }
+      const subjLink = (printNav.unitFolder !== null) ? 'data-action="nav-subject" class="breadcrumb-link"' : 'class="breadcrumb-current"';
+      breadcrumb += '<span ' + subjLink + '>' + subjectIcon(printNav.subject) + ' ' + printNav.subject + '</span>';
     }
     if (printNav.unitFolder !== null) {
       breadcrumb += '<span class="breadcrumb-sep">›</span>';
-      breadcrumb += '<span class="breadcrumb-current">📂 ' + printNav.unitFolder + '</span>';
+      const unitLink = (printNav.subUnitFolder !== null) ? 'data-action="nav-unit" class="breadcrumb-link"' : 'class="breadcrumb-current"';
+      breadcrumb += '<span ' + unitLink + '>📂 ' + printNav.unitFolder + '</span>';
+    }
+    if (printNav.subUnitFolder !== null && printNav.subUnitFolder !== '') {
+      breadcrumb += '<span class="breadcrumb-sep">›</span>';
+      breadcrumb += '<span class="breadcrumb-current">📄 ' + printNav.subUnitFolder + '</span>';
     }
     breadcrumb += '</div>';
 
@@ -923,7 +950,7 @@ async function renderPrintTab() {
       html += '</div>';
     }
 
-    // === レベル4: 単元フォルダ選択 ===
+    // === レベル4: 大単元フォルダ選択 ===
     else if (printNav.unitFolder === null) {
       const filtered = prints.filter(p =>
         p.book === printNav.book &&
@@ -943,19 +970,16 @@ async function renderPrintTab() {
         }
       }
 
-      // 単元フォルダをグループ化（unit フィールドが単元フォルダ名）
+      // 大単元フォルダをグループ化
       const folderMap = {};
       filtered.forEach(p => {
         const folderName = p.unit || '（単元未設定）';
         if (!folderMap[folderName]) folderMap[folderName] = [];
         folderMap[folderName].push(p);
       });
-
       const folders = Object.keys(folderMap).sort();
 
       html += '<div class="section-label">単元を選ぶ</div>';
-
-      // プリント追加ボタン
       html += '<button class="btn btn-blue" data-action="show-add" style="width:100%;margin-bottom:12px">＋ プリントを追加する</button>';
       if (window._showAddForm) html += renderAddForm();
 
@@ -964,15 +988,19 @@ async function renderPrintTab() {
       } else {
         folders.forEach(folderName => {
           const items = folderMap[folderName];
-          // 苦手一致チェック（単元名がnigate一覧に含まれるか）
           const isMatch = nigates.some(n => folderName.includes(n) || n.includes(folderName));
+          // 小単元があるか確認
+          const subUnits = getSubUnits(printNav.book, printNav.grade, printNav.subject, folderName);
+          const hasSubUnits = subUnits && subUnits.length > 0;
           html += '<div data-action="sel-unit-folder" data-val="' + escAttr(folderName) + '" class="folder-card">'
-            + '<div class="folder-icon unit">📂</div>'
+            + '<div class="folder-icon unit">' + (hasSubUnits ? '📁' : '📂') + '</div>'
             + '<div style="flex:1;min-width:0">'
             + '<div style="font-size:14px;font-weight:600">' + folderName
             + (isMatch ? '<span class="match-badge">苦手一致</span>' : '')
             + '</div>'
-            + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + items.length + '件</div>'
+            + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">'
+            + (hasSubUnits ? subUnits.length + '単元' : items.length + '件')
+            + '</div>'
             + '</div>'
             + '<div style="color:var(--text-hint);font-size:18px">›</div>'
             + '</div>';
@@ -980,14 +1008,57 @@ async function renderPrintTab() {
       }
     }
 
-    // === レベル5: PDF一覧 ===
-    else {
+    // === レベル5: 小単元フォルダ選択（小単元がある場合のみ）===
+    else if (printNav.subUnitFolder === null) {
+      const subUnits = getSubUnits(printNav.book, printNav.grade, printNav.subject, printNav.unitFolder);
+
+      // 小単元マスタなし or 空配列 → PDF一覧へ直接（subUnitFolder=''として扱う）
+      if (!subUnits || subUnits.length === 0) {
+        printNav.subUnitFolder = '';
+        // 再レンダリング（PDF一覧へ）
+        await renderPrintTab();
+        return;
+      }
+
+      html += '<div class="section-label">小単元を選ぶ</div>';
+
       const filtered = prints.filter(p =>
         p.book === printNav.book &&
         p.grade === printNav.grade &&
         p.subject === printNav.subject &&
         (p.unit || '（単元未設定）') === printNav.unitFolder
       );
+
+      subUnits.forEach(subName => {
+        const items = filtered.filter(p => (p.name || '').includes(subName) || (p.file_name || '').includes(subName));
+        // DB上のname/file_nameで絞り込めなくても表示はする
+        const cnt = items.length;
+        html += '<div data-action="sel-sub-unit" data-val="' + escAttr(subName) + '" class="folder-card">'
+          + '<div class="folder-icon unit">📄</div>'
+          + '<div style="flex:1;min-width:0">'
+          + '<div style="font-size:14px;font-weight:600">' + subName + '</div>'
+          + (cnt > 0 ? '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + cnt + '件</div>' : '')
+          + '</div>'
+          + '<div style="color:var(--text-hint);font-size:18px">›</div>'
+          + '</div>';
+      });
+    }
+
+    // === レベル6: PDF一覧 ===
+    else {
+      // subUnitFolder='' → 大単元直下のPDF全部、文字列 → 小単元名でフィルタ
+      const filtered = prints.filter(p => {
+        if (p.book !== printNav.book) return false;
+        if (p.grade !== printNav.grade) return false;
+        if (p.subject !== printNav.subject) return false;
+        if ((p.unit || '（単元未設定）') !== printNav.unitFolder) return false;
+        if (printNav.subUnitFolder !== '') {
+          // 小単元名でフィルタ（nameまたはfile_nameに含まれるか）
+          const sub = printNav.subUnitFolder;
+          return (p.name || '').includes(sub) || (p.file_name || '').includes(sub);
+        }
+        return true;
+      });
 
       html += '<button class="btn btn-blue" data-action="show-add" style="width:100%;margin-bottom:12px">＋ プリントを追加する</button>';
       if (window._showAddForm) html += renderAddForm();
@@ -998,7 +1069,6 @@ async function renderPrintTab() {
         filtered.forEach(p => {
           const sel = selectedPrints.includes(p.id);
           const hist = printHistory.filter(h => h.print_id === p.id);
-          // nameフィールドをPDFの表示名として使用
           const displayName = p.name || p.unit || '名称未設定';
           html += '<div class="print-card ' + (sel?'selected':'') + '" data-action="toggle-print" data-id="' + p.id + '">'
             + '<div class="pc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="' + (sel?'#534AB7':'#888780') + '" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>'
@@ -1029,14 +1099,16 @@ async function renderPrintTab() {
       const t = e.target.closest('[data-action]');
       if (!t) return;
       const action = t.dataset.action;
-      if (action === 'nav-root') { printNav = {book:null,grade:null,subject:null,unitFolder:null}; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'nav-book') { printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'nav-grade') { printNav.subject=null; printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'nav-subject') { printNav.unitFolder=null; window._showAddForm=false; await renderPrintTab(); }
-      else if (action === 'sel-book') { printNav.book=t.dataset.val; printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; await renderPrintTab(); }
-      else if (action === 'sel-grade') { printNav.grade=t.dataset.val; printNav.subject=null; printNav.unitFolder=null; await renderPrintTab(); }
-      else if (action === 'sel-subject') { printNav.subject=t.dataset.val; printNav.unitFolder=null; await renderPrintTab(); }
-      else if (action === 'sel-unit-folder') { printNav.unitFolder=t.dataset.val; await renderPrintTab(); }
+      if (action === 'nav-root') { printNav = {book:null,grade:null,subject:null,unitFolder:null,subUnitFolder:null}; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-book') { printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; printNav.subUnitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-grade') { printNav.subject=null; printNav.unitFolder=null; printNav.subUnitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-subject') { printNav.unitFolder=null; printNav.subUnitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'nav-unit') { printNav.subUnitFolder=null; window._showAddForm=false; await renderPrintTab(); }
+      else if (action === 'sel-book') { printNav.book=t.dataset.val; printNav.grade=null; printNav.subject=null; printNav.unitFolder=null; printNav.subUnitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-grade') { printNav.grade=t.dataset.val; printNav.subject=null; printNav.unitFolder=null; printNav.subUnitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-subject') { printNav.subject=t.dataset.val; printNav.unitFolder=null; printNav.subUnitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-unit-folder') { printNav.unitFolder=t.dataset.val; printNav.subUnitFolder=null; await renderPrintTab(); }
+      else if (action === 'sel-sub-unit') { printNav.subUnitFolder=t.dataset.val; await renderPrintTab(); }
       else if (action === 'show-add') { window._showAddForm=!window._showAddForm; await renderPrintTab(); }
       else if (action === 'toggle-print') {
         const idx = selectedPrints.indexOf(t.dataset.id);
@@ -1321,7 +1393,7 @@ async function addPrintFromForm() {
 
   await loadPrints();
   window._showAddForm = false;
-  printNav = { book, grade, subject, unitFolder: unit };
+  printNav = { book, grade, subject, unitFolder: unit, subUnitFolder: '' };
   toast('追加しました：' + displayName);
   await renderPrintTab();
 }
