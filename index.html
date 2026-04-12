@@ -1273,17 +1273,17 @@ function processBulkFiles(files) {
     preview.innerHTML = '<div style="color:var(--text-hint);font-size:13px">PDFファイルが見つかりません</div>';
     return;
   }
-  const parsed = window._bulkFiles.map(f => parseBulkPath(f._path || f.webkitRelativePath || f.name));
+  const parsed = window._bulkFiles.map(f => ({ ...parseBulkPath(f._path || f.webkitRelativePath || f.name), rawPath: f._path || f.webkitRelativePath || f.name }));
   preview.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text-sub);margin-bottom:8px">' + window._bulkFiles.length + '件を検出</div>'
     + '<div style="max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:8px">'
-    + parsed.map((p, i) => '<div style="font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border);display:flex;gap:8px;align-items:center">'
-      + '<span style="color:var(--text-hint);min-width:24px">' + (i+1) + '.</span>'
-      + '<span style="flex:1">'
+    + parsed.map((p, i) => '<div style="font-size:11px;padding:4px 0;border-bottom:0.5px solid var(--border)">'
+      + '<div style="color:var(--text-hint);margin-bottom:2px">📂 ' + p.rawPath + '</div>'
+      + '<div><span style="color:var(--text-hint)">' + (i+1) + '. </span>'
       + (p.grade||'?') + ' / ' + (p.subject||'?') + ' / '
       + '<strong>' + (p.unit||'?') + '</strong>'
       + (p.subUnit ? ' / ' + p.subUnit : '')
       + ' / ' + (p.displayName||'?')
-      + '</span>'
+      + '</div>'
       + '</div>').join('')
     + '</div>';
 }
