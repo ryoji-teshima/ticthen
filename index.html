@@ -369,7 +369,7 @@ async function saveMemo(studentId, memo) {
 }
 
 async function loadPrints() {
-  const { data, error } = await sb.from('prints').select('id,name,subject,unit,grade,book,file_name,file_url,created_at').order('created_at');
+  const { data, error } = await sb.from('prints').select('id,name,subject,unit,sub_unit,grade,book,file_name,file_url,created_at').order('created_at');
   if (error) throw error;
   prints = data || [];
   try {
@@ -990,8 +990,8 @@ async function renderPrintTab() {
           const items = folderMap[folderName];
           const isMatch = nigates.some(n => folderName.includes(n) || n.includes(folderName));
           // 小単元があるか確認
-          const subUnits = getSubUnits(printNav.book, printNav.grade, printNav.subject, folderName);
-          const hasSubUnits = subUnits && subUnits.length > 0;
+          const subUnitSet = new Set(items.map(p => p.sub_unit).filter(s => s));
+          const hasSubUnits = subUnitSet.size > 0;
           html += '<div data-action="sel-unit-folder" data-val="' + escAttr(folderName) + '" class="folder-card">'
             + '<div class="folder-icon unit">' + (hasSubUnits ? '📁' : '📂') + '</div>'
             + '<div style="flex:1;min-width:0">'
@@ -999,7 +999,7 @@ async function renderPrintTab() {
             + (isMatch ? '<span class="match-badge">苦手一致</span>' : '')
             + '</div>'
             + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">'
-            + (hasSubUnits ? subUnits.length + '単元' : items.length + '件')
+            + (hasSubUnits ? subUnitSet.size + '小単元' : items.length + '件')
             + '</div>'
             + '</div>'
             + '<div style="color:var(--text-hint);font-size:18px">›</div>'
@@ -1008,36 +1008,33 @@ async function renderPrintTab() {
       }
     }
 
-    // === レベル5: 小単元フォルダ選択（小単元がある場合のみ）===
+    // === レベル5: 小単元フォルダ選択（sub_unitがあるものだけ表示）===
     else if (printNav.subUnitFolder === null) {
-      const subUnits = getSubUnits(printNav.book, printNav.grade, printNav.subject, printNav.unitFolder);
+      const filtered = prints.filter(p =>
+        p.book === printNav.book &&
+        p.grade === printNav.grade &&
+        p.subject === printNav.subject &&
+        p.unit === printNav.unitFolder
+      );
 
-      // 小単元マスタなし or 空配列 → PDF一覧へ直接（subUnitFolder=''として扱う）
-      if (!subUnits || subUnits.length === 0) {
+      // sub_unitを持つものがあるか確認
+      const subUnitSet = new Set(filtered.map(p => p.sub_unit).filter(s => s));
+
+      // 小単元なし → 直接PDF一覧へ
+      if (subUnitSet.size === 0) {
         printNav.subUnitFolder = '';
-        // 再レンダリング（PDF一覧へ）
         await renderPrintTab();
         return;
       }
 
       html += '<div class="section-label">小単元を選ぶ</div>';
-
-      const filtered = prints.filter(p =>
-        p.book === printNav.book &&
-        p.grade === printNav.grade &&
-        p.subject === printNav.subject &&
-        (p.unit || '（単元未設定）') === printNav.unitFolder
-      );
-
-      subUnits.forEach(subName => {
-        const items = filtered.filter(p => (p.name || '').includes(subName) || (p.file_name || '').includes(subName));
-        // DB上のname/file_nameで絞り込めなくても表示はする
-        const cnt = items.length;
+      [...subUnitSet].sort().forEach(subName => {
+        const cnt = filtered.filter(p => p.sub_unit === subName).length;
         html += '<div data-action="sel-sub-unit" data-val="' + escAttr(subName) + '" class="folder-card">'
           + '<div class="folder-icon unit">📄</div>'
           + '<div style="flex:1;min-width:0">'
           + '<div style="font-size:14px;font-weight:600">' + subName + '</div>'
-          + (cnt > 0 ? '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + cnt + '件</div>' : '')
+          + '<div style="font-size:12px;color:var(--text-hint);margin-top:2px">' + cnt + '件</div>'
           + '</div>'
           + '<div style="color:var(--text-hint);font-size:18px">›</div>'
           + '</div>';
@@ -1046,16 +1043,14 @@ async function renderPrintTab() {
 
     // === レベル6: PDF一覧 ===
     else {
-      // subUnitFolder='' → 大単元直下のPDF全部、文字列 → 小単元名でフィルタ
+      // subUnitFolder='' → 大単元直下のPDF全部、文字列 → sub_unitカラムでフィルタ
       const filtered = prints.filter(p => {
         if (p.book !== printNav.book) return false;
         if (p.grade !== printNav.grade) return false;
         if (p.subject !== printNav.subject) return false;
-        if ((p.unit || '（単元未設定）') !== printNav.unitFolder) return false;
+        if (p.unit !== printNav.unitFolder) return false;
         if (printNav.subUnitFolder !== '') {
-          // 小単元名でフィルタ（nameまたはfile_nameに含まれるか）
-          const sub = printNav.subUnitFolder;
-          return (p.name || '').includes(sub) || (p.file_name || '').includes(sub);
+          return p.sub_unit === printNav.subUnitFolder;
         }
         return true;
       });
@@ -1225,59 +1220,49 @@ function renderBulkForm(book, books) {
     + '<button class="btn btn-blue" data-action="do-bulk-upload" style="width:100%">一括登録する</button>';
 }
 
-// ===== フォルダパース（5階層対応）=====
-// 想定パス例: 中1/英語/be動詞/問題1.pdf
-//             ちびむす/中2/数学/連立方程式/基礎問題.pdf
+// ===== フォルダパース =====
+// フォルダ構造をそのまま反映する
+// 例1（小単元あり）: 数学/文字式/文字の使用/問題.pdf
+//   → grade=中1(別途), subject=数学, unit=文字式, subUnit=文字の使用, displayName=問題
+// 例2（小単元なし）: 数学/正負の足し算・引き算/問題.pdf
+//   → grade=中1(別途), subject=数学, unit=正負の足し算・引き算, subUnit=null, displayName=問題
+// 除外ワード: 問題集名・学年・科目名はフォルダとして扱わない
 function parseBulkPath(path) {
-  const parts = (path || '').replace(/\\/g, '/').split('/').filter(p => p);
-  if (parts.length < 1) return { grade: null, subject: null, unitFolder: null, displayName: null };
-
-  const fileName = parts[parts.length - 1];
-  // 拡張子除去 + 連番除去（"1. be動詞" → "be動詞"）
-  const displayName = fileName.replace(/\.[^.]+$/, '').replace(/^\d+[\.\s_\-]+/, '').trim();
-
+  const SKIP_WORDS = ['ひとつひとつわかりやすく', 'ちびむす'];
   const gradeKeys = Object.keys(GRADE_SUBJECTS);
   const subjectKeys = Object.keys(SUBJECT_UNITS);
 
-  let grade = null, subject = null, unitFolder = null;
+  const parts = (path || '').replace(/\\/g, '/').split('/').filter(p => p);
+  if (parts.length < 1) return { grade: null, subject: null, unit: null, subUnit: null, displayName: null };
 
-  // パスの各パーツから学年・科目を推定
-  parts.forEach(p => {
-    if (!grade) {
-      const g = gradeKeys.find(g => p === g || p.includes(g));
-      if (g) grade = g;
-    }
-    if (!subject) {
-      const s = subjectKeys.find(s => p === s || p.includes(s));
-      if (s) subject = s;
-    }
+  const fileName = parts[parts.length - 1];
+  const displayName = fileName.replace(/\.[^.]+$/, '').replace(/^\d+[\.\s_\-]+/, '').trim();
+
+  // ファイルを除いたフォルダ部分
+  const folders = parts.slice(0, -1);
+
+  let grade = null, subject = null;
+
+  // 学年・科目・除外ワードを除いた「意味のあるフォルダ」だけ抽出
+  const meaningfulFolders = [];
+  folders.forEach(p => {
+    if (SKIP_WORDS.includes(p)) return;
+    if (gradeKeys.includes(p) || /^(中|小)[1-6]$/.test(p)) { if (!grade) grade = p; return; }
+    if (subjectKeys.includes(p)) { if (!subject) subject = p; return; }
+    meaningfulFolders.push(p);
   });
 
-  // 正規表現フォールバック
-  if (!grade) {
-    const m = path.match(/(中|小)[1-6]/);
-    if (m) grade = m[0];
-  }
+  // フォールバック：パス文字列から学年・科目を推定
+  if (!grade) { const m = path.match(/(中|小)[1-6]/); if (m) grade = m[0]; }
   if (!subject) {
-    const subMap = {'数学':'数学','英語':'英語','国語':'国語','理科':'理科','社会':'社会','算数':'算数'};
-    Object.keys(subMap).forEach(k => { if (!subject && path.includes(k)) subject = subMap[k]; });
+    subjectKeys.forEach(k => { if (!subject && path.includes(k)) subject = k; });
   }
 
-  // 単元フォルダ：ファイルの1つ上のフォルダ（ファイルを除いた最後のパーツ）
-  // ただしそのフォルダが学年や科目や問題集名でない場合のみ
-  if (parts.length >= 2) {
-    const parentFolder = parts[parts.length - 2];
-    // 学年・科目・問題集名でなければ単元フォルダとみなす
-    const isGradeOrSubject = gradeKeys.includes(parentFolder)
-      || subjectKeys.includes(parentFolder)
-      || ['ひとつひとつわかりやすく','ちびむす'].includes(parentFolder)
-      || /^(中|小)[1-6]$/.test(parentFolder);
-    if (!isGradeOrSubject) {
-      unitFolder = parentFolder;
-    }
-  }
+  // meaningfulFolders[0] = 大単元(unit), [1] = 小単元(subUnit)
+  const unit = meaningfulFolders[0] || null;
+  const subUnit = meaningfulFolders[1] || null;
 
-  return { grade, subject, unitFolder, displayName };
+  return { grade, subject, unit, subUnit, displayName };
 }
 
 function processBulkFiles(files) {
@@ -1292,10 +1277,11 @@ function processBulkFiles(files) {
   preview.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text-sub);margin-bottom:8px">' + window._bulkFiles.length + '件を検出</div>'
     + '<div style="max-height:200px;overflow-y:auto;border:0.5px solid var(--border);border-radius:var(--radius);padding:8px">'
     + parsed.map((p, i) => '<div style="font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border);display:flex;gap:8px;align-items:center">'
-      + '<span style="color:var(--text-hint);min-width:32px">' + (i+1) + '.</span>'
+      + '<span style="color:var(--text-hint);min-width:24px">' + (i+1) + '.</span>'
       + '<span style="flex:1">'
       + (p.grade||'?') + ' / ' + (p.subject||'?') + ' / '
-      + '<strong>' + (p.unitFolder||'（単元なし）') + '</strong>'
+      + '<strong>' + (p.unit||'?') + '</strong>'
+      + (p.subUnit ? ' / ' + p.subUnit : '')
       + ' / ' + (p.displayName||'?')
       + '</span>'
       + '</div>').join('')
@@ -1314,10 +1300,8 @@ async function doBulkUpload() {
     const f = window._bulkFiles[i];
     const parsed = parseBulkPath(f._path || f.webkitRelativePath || f.name);
 
-    if (!parsed.grade || !parsed.subject) { fail++; continue; }
+    if (!parsed.grade || !parsed.subject || !parsed.unit) { fail++; continue; }
 
-    // unitFolder が null の場合は「単元未設定」
-    const unitFolderName = parsed.unitFolder || '（単元未設定）';
     const displayName = parsed.displayName || f.name.replace(/\.[^.]+$/, '');
 
     try {
@@ -1329,12 +1313,13 @@ async function doBulkUpload() {
       const { data: urlData } = sb.storage.from('prints').getPublicUrl(filePath);
       const fileUrl = urlData.publicUrl;
 
-      // unit = 単元フォルダ名, name = PDF表示名
+      // unit=大単元, sub_unit=小単元（nullも可）, name=PDF表示名
       const { data: newPrint, error } = await sb.from('prints')
         .insert({
           name: displayName,
           subject: parsed.subject,
-          unit: unitFolderName,
+          unit: parsed.unit,
+          sub_unit: parsed.subUnit || null,
           grade: parsed.grade,
           book,
           file_url: fileUrl,
@@ -1343,8 +1328,8 @@ async function doBulkUpload() {
         .select().single();
 
       if (!error && newPrint) {
-        // print_unitsには単元フォルダ名を登録（苦手マッチング用）
-        await sb.from('print_units').insert({ print_id: newPrint.id, subject: parsed.subject, unit: unitFolderName });
+        // 苦手マッチングには大単元名を使う
+        await sb.from('print_units').insert({ print_id: newPrint.id, subject: parsed.subject, unit: parsed.unit });
         success++;
       } else { fail++; }
     } catch(e) { fail++; }
