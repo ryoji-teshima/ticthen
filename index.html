@@ -1090,6 +1090,34 @@ async function renderPrintTab() {
 
     el.innerHTML = html;
 
+    // フォルダ選択・ドロップイベント設定
+    const bulkInput2 = document.getElementById('bulk-files');
+    if (bulkInput2) {
+      bulkInput2.onchange = function() { processBulkFiles(Array.from(this.files)); };
+    }
+    const dropZone2 = document.getElementById('bulk-drop-zone');
+    if (dropZone2) {
+      dropZone2.ondragover = e => { e.preventDefault(); dropZone2.style.borderColor='var(--blue)'; dropZone2.style.background='var(--blue-light)'; };
+      dropZone2.ondragleave = () => { dropZone2.style.borderColor=''; dropZone2.style.background=''; };
+      dropZone2.ondrop = e => {
+        e.preventDefault();
+        dropZone2.style.borderColor=''; dropZone2.style.background='';
+        const files = [];
+        const traverse = (entry, path) => {
+          if (entry.isFile) {
+            entry.file(f => { f._path = path + f.name; files.push(f); processBulkFiles(files); });
+          } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            reader.readEntries(entries2 => entries2.forEach(en => traverse(en, path + entry.name + '/')));
+          }
+        };
+        Array.from(e.dataTransfer.items).forEach(item => {
+          const entry = item.webkitGetAsEntry();
+          if (entry) traverse(entry, '');
+        });
+      };
+    }
+
     // イベント委任
     el.onclick = async function(e) {
       const t = e.target.closest('[data-action]');
